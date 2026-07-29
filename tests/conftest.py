@@ -18,6 +18,10 @@ def app_module(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "app.db"))
     monkeypatch.setenv("MOCK_MODE", "true")
+    # Settings reads the repo's local .env (gitignored, developer-owned) --
+    # pin auth-relevant values so a developer's local dev convenience
+    # (e.g. API_KEY_REQUIRED=false) can't silently change test behavior.
+    monkeypatch.setenv("API_KEY_REQUIRED", "true")
 
     import app.main as main_module
 

@@ -155,7 +155,7 @@ def test_extract_tenant_code_header_stored_verbatim(auth_client, sample_jpeg_byt
     r = auth_client.post(
         "/v1/extract",
         files={"file": ("i.jpg", sample_jpeg_bytes, "image/jpeg")},
-        headers={"tenant_code": "acme"},
+        headers={"X-TenantCode": "acme"},
     )
     row = get_request(auth_client.app.state.db, r.json()["request_id"])
     assert row["tenant_code"] == "acme"
@@ -165,6 +165,22 @@ def test_extract_tenant_code_defaults_to_1_when_absent(auth_client, sample_jpeg_
     r = auth_client.post("/v1/extract", files={"file": ("i.jpg", sample_jpeg_bytes, "image/jpeg")})
     row = get_request(auth_client.app.state.db, r.json()["request_id"])
     assert row["tenant_code"] == "1"
+
+
+def test_extract_user_name_header_stored_verbatim(auth_client, sample_jpeg_bytes):
+    r = auth_client.post(
+        "/v1/extract",
+        files={"file": ("i.jpg", sample_jpeg_bytes, "image/jpeg")},
+        headers={"X-UserName": "nguyen.van.a"},
+    )
+    row = get_request(auth_client.app.state.db, r.json()["request_id"])
+    assert row["user_name"] == "nguyen.van.a"
+
+
+def test_extract_user_name_defaults_to_none_when_absent(auth_client, sample_jpeg_bytes):
+    r = auth_client.post("/v1/extract", files={"file": ("i.jpg", sample_jpeg_bytes, "image/jpeg")})
+    row = get_request(auth_client.app.state.db, r.json()["request_id"])
+    assert row["user_name"] is None
 
 
 def test_extract_missing_mock_fixture_returns_unusable_not_500(auth_client, sample_jpeg_bytes):

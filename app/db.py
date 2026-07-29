@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS requests (
     api_key_label  TEXT,
     source         TEXT NOT NULL,
     tenant_code    TEXT NOT NULL DEFAULT '1',
+    user_name      TEXT,
 
     filename       TEXT,
     content_type   TEXT,
@@ -90,6 +91,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(requests)")}
     if cols and "tenant_code" not in cols:
         conn.execute("ALTER TABLE requests ADD COLUMN tenant_code TEXT NOT NULL DEFAULT '1'")
+    if cols and "user_name" not in cols:
+        conn.execute("ALTER TABLE requests ADD COLUMN user_name TEXT")
     conn.executescript(SCHEMA)
     conn.commit()
 
@@ -156,7 +159,8 @@ def insert_request(conn: sqlite3.Connection, row: dict) -> None:
     conn.execute(
         """
         INSERT INTO requests (
-            request_id, created_at, api_key_id, api_key_label, source, tenant_code,
+            request_id, created_at, api_key_id, api_key_label, source,
+            tenant_code, user_name,
             filename, content_type, file_bytes, page_count,
             status, confidence, price_basis, line_count, grand_total,
             cache_hit, model, attempt_count, latency_ms,
@@ -164,7 +168,8 @@ def insert_request(conn: sqlite3.Connection, row: dict) -> None:
             cost_usd, cost_source, usage_json,
             response_json, error
         ) VALUES (
-            :request_id, :created_at, :api_key_id, :api_key_label, :source, :tenant_code,
+            :request_id, :created_at, :api_key_id, :api_key_label, :source,
+            :tenant_code, :user_name,
             :filename, :content_type, :file_bytes, :page_count,
             :status, :confidence, :price_basis, :line_count, :grand_total,
             :cache_hit, :model, :attempt_count, :latency_ms,

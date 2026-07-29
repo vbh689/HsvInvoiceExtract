@@ -570,6 +570,7 @@ async def extract_submit(
             "api_key_label": "dashboard-test",
             "source": "dashboard",
             "tenant_code": "1",
+            "user_name": None,
             "filename": file.filename,
             "content_type": file.content_type,
             "file_bytes": len(raw_bytes),

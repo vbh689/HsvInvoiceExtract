@@ -10,6 +10,7 @@
     <span class="summary-item">confidence <strong>{{ "%.0f"|format(entry["confidence"] * 100) }}%</strong></span>
     <span class="summary-item">source <strong>{{ entry["source"] }}</strong></span>
     <span class="summary-item">key <strong>{{ entry["api_key_label"] or "—" }}</strong></span>
+    <span class="summary-item">user <strong>{{ entry["user_name"] or "—" }}</strong></span>
 </div>
 
 {% if entry["error"] %}

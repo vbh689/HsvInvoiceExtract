@@ -66,6 +66,7 @@ def _row(**overrides) -> dict:
         "api_key_label": "prod",
         "source": "api",
         "tenant_code": "1",
+        "user_name": None,
         "filename": "invoice.jpg",
         "content_type": "image/jpeg",
         "file_bytes": 1234,

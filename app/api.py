@@ -34,8 +34,14 @@ def require_api_key(
     return row
 
 
-def get_tenant_code(tenant_code: str | None = Header(default=None, alias="tenant_code")) -> str:
+def get_tenant_code(
+    tenant_code: str | None = Header(default=None, alias="X-TenantCode"),
+) -> str:
     return tenant_code.strip() if tenant_code and tenant_code.strip() else "1"
+
+
+def get_user_name(user_name: str | None = Header(default=None, alias="X-UserName")) -> str | None:
+    return user_name.strip() if user_name and user_name.strip() else None
 
 
 def _resolve_content_type(declared: str | None, raw_bytes: bytes) -> str:
@@ -85,6 +91,7 @@ async def extract_endpoint(
     x_model: str | None = Header(default=None, alias="X-Model"),
     api_key_row: sqlite3.Row | None = Depends(require_api_key),
     tenant_code: str = Depends(get_tenant_code),
+    user_name: str | None = Depends(get_user_name),
 ) -> ExtractionResponse:
     settings: Settings = request.app.state.settings
     db: sqlite3.Connection = request.app.state.db
@@ -139,6 +146,7 @@ async def extract_endpoint(
             "api_key_label": api_key_row["label"] if api_key_row else None,
             "source": "api",
             "tenant_code": tenant_code,
+            "user_name": user_name,
             "filename": file.filename,
             "content_type": content_type,
             "file_bytes": len(raw_bytes),

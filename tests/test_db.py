@@ -36,6 +36,7 @@ def _sample_request_row(**overrides) -> dict:
         "api_key_label": None,
         "source": "api",
         "tenant_code": "1",
+        "user_name": None,
         "filename": "invoice.jpg",
         "content_type": "image/jpeg",
         "file_bytes": 1234,
@@ -145,6 +146,11 @@ def test_init_db_on_fresh_db_creates_tenant_code_column(db):
     assert "tenant_code" in cols
 
 
+def test_init_db_on_fresh_db_creates_user_name_column(db):
+    cols = {row["name"] for row in db.execute("PRAGMA table_info(requests)")}
+    assert "user_name" in cols
+
+
 def test_init_db_migrates_existing_requests_table_missing_tenant_code(tmp_path):
     from app.db import init_db
 
@@ -192,4 +198,5 @@ def test_init_db_migrates_existing_requests_table_missing_tenant_code(tmp_path):
 
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(requests)")}
     assert "tenant_code" in cols
+    assert "user_name" in cols
     conn.close()

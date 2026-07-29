@@ -21,11 +21,12 @@
 <div class="section-header"><h2>Recent requests for this tenant</h2></div>
 <div class="table-card">
     <table>
-        <thead><tr><th>Time</th><th>Status</th><th>Confidence</th><th>Lines</th><th>Cost</th><th></th></tr></thead>
+        <thead><tr><th>Time</th><th>User</th><th>Status</th><th>Confidence</th><th>Lines</th><th>Cost</th><th></th></tr></thead>
         <tbody>
         {% for row in recent %}
             <tr>
                 <td>{{ row["created_at"] }}</td>
+                <td>{{ row["user_name"] or "—" }}</td>
                 <td><span class="badge status-{{ row['status'] }}">{{ row["status"] }}</span></td>
                 <td>{{ "%.0f"|format(row["confidence"] * 100) }}%</td>
                 <td>{{ row["line_count"] }}</td>
@@ -33,7 +34,7 @@
                 <td><a href="/dashboard/logs/{{ row['request_id'] }}">view</a></td>
             </tr>
         {% else %}
-            <tr><td colspan="6">No requests in this period.</td></tr>
+            <tr><td colspan="7">No requests in this period.</td></tr>
         {% endfor %}
         </tbody>
     </table>
