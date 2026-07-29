@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.llm import (
@@ -107,3 +109,41 @@ def test_model_without_override_falls_back_to_shared_settings():
 
     assert str(client._client.base_url) == "https://shared.example/v1/"
     assert client._client.api_key == "shared-key"
+
+
+class _StubCompletions:
+    """Captures kwargs passed to chat.completions.create instead of hitting the network."""
+
+    def __init__(self):
+        self.kwargs: dict | None = None
+
+    async def create(self, **kwargs):
+        self.kwargs = kwargs
+        message = type(
+            "Msg", (), {"content": json.dumps({"line_items": [], "model_notes": None})}
+        )()
+        choice = type("Choice", (), {"message": message})()
+        response = type("Response", (), {"choices": [choice], "usage": None})()
+        return response
+
+
+async def test_extract_sends_reasoning_effort_low_by_default():
+    settings = Settings(llm_reasoning_effort="low", llm_supports_structured_output=False)
+    client = OpenAICompatibleClient(settings, _model())
+    stub = _StubCompletions()
+    client._client.chat.completions = stub
+
+    await client.extract(images=[b"fake"], prompt="dummy prompt")
+
+    assert stub.kwargs["reasoning_effort"] == "low"
+
+
+async def test_extract_omits_reasoning_effort_when_off():
+    settings = Settings(llm_reasoning_effort="off", llm_supports_structured_output=False)
+    client = OpenAICompatibleClient(settings, _model())
+    stub = _StubCompletions()
+    client._client.chat.completions = stub
+
+    await client.extract(images=[b"fake"], prompt="dummy prompt")
+
+    assert "reasoning_effort" not in stub.kwargs

@@ -52,9 +52,13 @@ class PipelineResult:
 
 
 def compute_cache_key(
-    content_hash: str, prompt_version: str, schema_version: str, model_name: str
+    content_hash: str,
+    prompt_version: str,
+    schema_version: str,
+    model_name: str,
+    reasoning_effort: str,
 ) -> str:
-    key = f"{content_hash}:{prompt_version}:{schema_version}:{model_name}"
+    key = f"{content_hash}:{prompt_version}:{schema_version}:{model_name}:{reasoning_effort}"
     return hashlib.sha256(key.encode()).hexdigest()
 
 
@@ -145,6 +149,7 @@ async def extract(
     client: VisionExtractionClient,
     db: sqlite3.Connection,
     model_name: str,
+    reasoning_effort: str | None,
 ) -> PipelineResult:
     request_id = str(uuid.uuid4())
     created_at = datetime.now(UTC)
@@ -158,7 +163,11 @@ async def extract(
     )
     page_count = len(normalized.pages)
     cache_key = compute_cache_key(
-        normalized.content_hash, settings.prompt_version, settings.schema_version, model_name
+        normalized.content_hash,
+        settings.prompt_version,
+        settings.schema_version,
+        model_name,
+        reasoning_effort or "off",
     )
 
     if settings.cache_enabled:

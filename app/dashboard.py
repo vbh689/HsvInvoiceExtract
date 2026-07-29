@@ -558,6 +558,7 @@ async def extract_submit(
         client=client,
         db=db,
         model_name=model.name,
+        reasoning_effort=settings.effective_reasoning_effort(model),
     )
     response = result.response
 

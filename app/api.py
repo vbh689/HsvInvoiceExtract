@@ -115,6 +115,7 @@ async def extract_endpoint(
         client=client,
         db=db,
         model_name=model.name,
+        reasoning_effort=settings.effective_reasoning_effort(model),
     )
     response = result.response
     document = response.document

@@ -22,6 +22,8 @@ class ModelConfig(BaseModel):
     # None = inherit the shared llm_base_url/llm_api_key below.
     base_url: str | None = None
     api_key: str | None = None
+    # None = inherit Settings.llm_reasoning_effort below.
+    reasoning_effort: str | None = None
 
 
 _DEFAULT_MODELS = [
@@ -71,6 +73,7 @@ class LLMModelsSource(PydanticBaseSettingsSource):
                     price_per_1m_output=float(price_out) if price_out else 0.0,
                     base_url=raw.get(f"{prefix}_BASE_URL"),
                     api_key=raw.get(f"{prefix}_API_KEY"),
+                    reasoning_effort=raw.get(f"{prefix}_REASONING_EFFORT"),
                 )
             )
         return {"llm_models": models}
@@ -93,6 +96,7 @@ class Settings(BaseSettings):
     llm_timeout_s: float = 25.0
     llm_supports_structured_output: bool = True
     llm_retry_on_failure: bool = True
+    llm_reasoning_effort: str = "low"  # "off"/"" = don't send the param at all
     openrouter_site_url: str | None = None
     openrouter_site_name: str | None = None
 
@@ -161,6 +165,14 @@ class Settings(BaseSettings):
                 if model.name == name:
                     return model
         return self.default_model
+
+    def effective_reasoning_effort(self, model: ModelConfig) -> str | None:
+        """None = omit the parameter entirely."""
+        value = model.reasoning_effort
+        if value is None:
+            value = self.llm_reasoning_effort
+        value = value.strip().lower()
+        return None if value in ("", "off") else value
 
     @classmethod
     def settings_customise_sources(

@@ -108,6 +108,9 @@ class OpenAICompatibleClient:
             }
         if self._extra_headers:
             kwargs["extra_headers"] = self._extra_headers
+        effort = settings.effective_reasoning_effort(self._model)
+        if effort:
+            kwargs["reasoning_effort"] = effort
 
         start = time.monotonic()
         response = await self._client.chat.completions.create(

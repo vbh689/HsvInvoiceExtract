@@ -1,3 +1,5 @@
+import pytest
+
 from app.settings import ModelConfig, Settings
 
 
@@ -127,3 +129,50 @@ def test_init_kwarg_wins_over_numbered_slots(monkeypatch):
         _env_file=None,
     )
     assert settings.llm_models[0].name == "from-kwarg"
+
+
+def test_per_model_reasoning_effort_override(monkeypatch):
+    settings = _settings(
+        monkeypatch,
+        LLM_MODEL_1="first",
+        LLM_MODEL_1_PRICE_IN="0.1",
+        LLM_MODEL_1_PRICE_OUT="0.1",
+        LLM_MODEL_2="second",
+        LLM_MODEL_2_PRICE_IN="0.2",
+        LLM_MODEL_2_PRICE_OUT="0.2",
+        LLM_MODEL_2_REASONING_EFFORT="off",
+    )
+    first, second = settings.llm_models
+    assert first.reasoning_effort is None
+    assert second.reasoning_effort == "off"
+
+
+def test_effective_reasoning_effort_defaults_to_shared_setting():
+    settings = Settings(llm_reasoning_effort="low", _env_file=None)
+    model = ModelConfig(name="m", price_per_1m_input=0.1, price_per_1m_output=0.1)
+    assert settings.effective_reasoning_effort(model) == "low"
+
+
+def test_effective_reasoning_effort_per_slot_override_wins():
+    settings = Settings(llm_reasoning_effort="low", _env_file=None)
+    model = ModelConfig(
+        name="m", price_per_1m_input=0.1, price_per_1m_output=0.1, reasoning_effort="high"
+    )
+    assert settings.effective_reasoning_effort(model) == "high"
+
+
+@pytest.mark.parametrize("value", ["off", "", "  OFF  "])
+def test_effective_reasoning_effort_off_and_empty_mean_omit(value):
+    settings = Settings(llm_reasoning_effort="low", _env_file=None)
+    model = ModelConfig(
+        name="m", price_per_1m_input=0.1, price_per_1m_output=0.1, reasoning_effort=value
+    )
+    assert settings.effective_reasoning_effort(model) is None
+
+
+def test_effective_reasoning_effort_none_literal_passes_through():
+    settings = Settings(llm_reasoning_effort="low", _env_file=None)
+    model = ModelConfig(
+        name="m", price_per_1m_input=0.1, price_per_1m_output=0.1, reasoning_effort="none"
+    )
+    assert settings.effective_reasoning_effort(model) == "none"

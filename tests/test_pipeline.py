@@ -95,7 +95,7 @@ def image_bytes() -> bytes:
     return buf.getvalue()
 
 
-async def _run(settings, client, db, image_bytes, model_name="fake-model"):
+async def _run(settings, client, db, image_bytes, model_name="fake-model", reasoning_effort=None):
     return await extract(
         raw_bytes=image_bytes,
         content_type="image/jpeg",
@@ -103,6 +103,7 @@ async def _run(settings, client, db, image_bytes, model_name="fake-model"):
         client=client,
         db=db,
         model_name=model_name,
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -204,16 +205,22 @@ async def test_cache_disabled_never_stores_or_reads(db, image_bytes):
 
 
 def test_compute_cache_key_is_deterministic():
-    a = compute_cache_key("abc123", "extract_v2", "v2", "gemini-3.5-flash-lite")
-    b = compute_cache_key("abc123", "extract_v2", "v2", "gemini-3.5-flash-lite")
-    c = compute_cache_key("abc123", "extract_v2", "v3", "gemini-3.5-flash-lite")
+    a = compute_cache_key("abc123", "extract_v2", "v2", "gemini-3.5-flash-lite", "low")
+    b = compute_cache_key("abc123", "extract_v2", "v2", "gemini-3.5-flash-lite", "low")
+    c = compute_cache_key("abc123", "extract_v2", "v3", "gemini-3.5-flash-lite", "low")
     assert a == b
     assert a != c
 
 
 def test_compute_cache_key_differs_by_model():
-    a = compute_cache_key("abc123", "extract_v2", "v2", "gemini-3.5-flash-lite")
-    b = compute_cache_key("abc123", "extract_v2", "v2", "gpt-4o-mini")
+    a = compute_cache_key("abc123", "extract_v2", "v2", "gemini-3.5-flash-lite", "low")
+    b = compute_cache_key("abc123", "extract_v2", "v2", "gpt-4o-mini", "low")
+    assert a != b
+
+
+def test_compute_cache_key_differs_by_reasoning_effort():
+    a = compute_cache_key("abc123", "extract_v2", "v2", "gemini-3.5-flash-lite", "low")
+    b = compute_cache_key("abc123", "extract_v2", "v2", "gemini-3.5-flash-lite", "off")
     assert a != b
 
 
@@ -225,6 +232,18 @@ async def test_same_bytes_different_model_is_not_a_cache_hit(db, image_bytes):
     assert first.cache_hit is False
 
     second = await _run(settings, client, db, image_bytes, model_name="model-b")
+    assert second.cache_hit is False
+    assert client.calls == 2
+
+
+async def test_same_bytes_different_reasoning_effort_is_not_a_cache_hit(db, image_bytes):
+    settings = Settings(cache_enabled=True)
+    client = FakeClient([_call_result(VALID_RAW_JSON), _call_result(VALID_RAW_JSON)])
+
+    first = await _run(settings, client, db, image_bytes, reasoning_effort="low")
+    assert first.cache_hit is False
+
+    second = await _run(settings, client, db, image_bytes, reasoning_effort="off")
     assert second.cache_hit is False
     assert client.calls == 2
 
