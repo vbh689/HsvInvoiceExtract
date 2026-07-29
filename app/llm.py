@@ -15,7 +15,7 @@ from typing import Protocol
 from openai import AsyncOpenAI
 
 from app.schemas import RawExtraction
-from app.settings import Settings
+from app.settings import ModelConfig, Settings
 
 SYSTEM_PROMPT = (
     "You are a meticulous document-transcription assistant for Vietnamese purchase invoices. "
@@ -54,7 +54,7 @@ def _to_data_url(image_bytes: bytes) -> str:
     return f"data:image/jpeg;base64,{encoded}"
 
 
-def _parse_usage(usage, settings: Settings) -> tuple[int, int, int, int, float, str, dict]:
+def _parse_usage(usage, model: ModelConfig) -> tuple[int, int, int, int, float, str, dict]:
     raw = usage.model_dump() if usage else {}
 
     tokens_in = raw.get("prompt_tokens", 0)
@@ -67,19 +67,21 @@ def _parse_usage(usage, settings: Settings) -> tuple[int, int, int, int, float, 
     if provider_cost is not None:
         cost_usd, cost_source = float(provider_cost), "provider"
     else:
-        cost_usd = (tokens_in / 1_000_000) * settings.llm_price_per_1m_input + (
+        cost_usd = (tokens_in / 1_000_000) * model.price_per_1m_input + (
             tokens_out / 1_000_000
-        ) * settings.llm_price_per_1m_output
+        ) * model.price_per_1m_output
         cost_source = "computed"
 
     return tokens_in, tokens_out, tokens_total, tokens_cached, cost_usd, cost_source, raw
 
 
 class OpenAICompatibleClient:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, model: ModelConfig) -> None:
         self._settings = settings
+        self._model = model
         self._client = AsyncOpenAI(
-            api_key=settings.llm_api_key or "unset", base_url=settings.llm_base_url
+            api_key=model.api_key or settings.llm_api_key or "unset",
+            base_url=model.base_url or settings.llm_base_url,
         )
         self._extra_headers: dict[str, str] = {}
         if settings.openrouter_site_url:
@@ -109,7 +111,7 @@ class OpenAICompatibleClient:
 
         start = time.monotonic()
         response = await self._client.chat.completions.create(
-            model=settings.llm_model,
+            model=self._model.name,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content},
@@ -126,11 +128,11 @@ class OpenAICompatibleClient:
             raise MalformedModelOutputError(f"model output was not valid JSON: {exc}") from exc
 
         tokens_in, tokens_out, tokens_total, tokens_cached, cost_usd, cost_source, usage_raw = (
-            _parse_usage(response.usage, settings)
+            _parse_usage(response.usage, self._model)
         )
         return LLMCallResult(
             raw_json=raw_json,
-            model=settings.llm_model,
+            model=self._model.name,
             latency_ms=latency_ms,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
@@ -148,9 +150,16 @@ class MockVisionClient:
     never hash-based, so mock-mode requests stay deterministic.
     """
 
-    def __init__(self, settings: Settings, fixture_name: str, fixture_dir: Path | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        fixture_name: str,
+        model: ModelConfig,
+        fixture_dir: Path | None = None,
+    ):
         self._settings = settings
         self._fixture_name = fixture_name
+        self._model = model
         self._dir = fixture_dir or DEFAULT_FIXTURE_DIR
 
     async def extract(self, *, images: list[bytes], prompt: str) -> LLMCallResult:
@@ -163,14 +172,13 @@ class MockVisionClient:
         tokens_in = len(prompt) // 4 + len(images) * 300
         tokens_out = len(json.dumps(raw_json)) // 4
         tokens_total = tokens_in + tokens_out
-        settings = self._settings
-        cost_usd = (tokens_in / 1_000_000) * settings.llm_price_per_1m_input + (
+        cost_usd = (tokens_in / 1_000_000) * self._model.price_per_1m_input + (
             tokens_out / 1_000_000
-        ) * settings.llm_price_per_1m_output
+        ) * self._model.price_per_1m_output
 
         return LLMCallResult(
             raw_json=raw_json,
-            model=settings.llm_model,
+            model=self._model.name,
             latency_ms=1.0,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
@@ -186,7 +194,10 @@ class MockVisionClient:
         )
 
 
-def build_client(settings: Settings, *, fixture_name: str = "default") -> VisionExtractionClient:
+def build_client(
+    settings: Settings, *, fixture_name: str = "default", model_name: str | None = None
+) -> VisionExtractionClient:
+    model = settings.resolve_model(model_name)
     if settings.mock_mode:
-        return MockVisionClient(settings, fixture_name)
-    return OpenAICompatibleClient(settings)
+        return MockVisionClient(settings, fixture_name, model)
+    return OpenAICompatibleClient(settings, model)

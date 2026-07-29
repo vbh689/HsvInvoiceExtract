@@ -30,8 +30,8 @@
 
             <div class="sidebar-footer">
                 <div class="footer-meta">
-                    <div>{{ request.app.state.settings.llm_model }}</div>
-                    <div>in ${{ request.app.state.settings.llm_price_per_1m_input }}/1M · out ${{ request.app.state.settings.llm_price_per_1m_output }}/1M</div>
+                    <div>{{ request.app.state.settings.default_model.name }}</div>
+                    <div>in ${{ request.app.state.settings.default_model.price_per_1m_input }}/1M · out ${{ request.app.state.settings.default_model.price_per_1m_output }}/1M</div>
                     <div>provider key: {{ "set" if request.app.state.settings.llm_api_key else "not set" }}</div>
                 </div>
                 <form action="/dashboard/logout" method="post">

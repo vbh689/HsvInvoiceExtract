@@ -51,8 +51,10 @@ class PipelineResult:
     avoided_tokens_total: int = 0
 
 
-def compute_cache_key(content_hash: str, prompt_version: str, schema_version: str) -> str:
-    key = f"{content_hash}:{prompt_version}:{schema_version}"
+def compute_cache_key(
+    content_hash: str, prompt_version: str, schema_version: str, model_name: str
+) -> str:
+    key = f"{content_hash}:{prompt_version}:{schema_version}:{model_name}"
     return hashlib.sha256(key.encode()).hexdigest()
 
 
@@ -103,6 +105,7 @@ def _malformed_response(
     call_result: LLMCallResult | None,
     attempts: int,
     error: str,
+    model_name: str,
 ) -> ExtractionResponse:
     finding = Finding(
         code=FindingCode.MALFORMED_MODEL_OUTPUT, severity=Severity.ERROR, message=error
@@ -118,7 +121,7 @@ def _malformed_response(
         findings=[finding],
         usage=UsageInfo(
             cached=False,
-            model=settings.llm_model,
+            model=model_name,
             attempts=attempts,
             latency_ms=call_result.latency_ms if call_result else 0.0,
             tokens_in=call_result.tokens_in if call_result else 0,
@@ -141,6 +144,7 @@ async def extract(
     settings: Settings,
     client: VisionExtractionClient,
     db: sqlite3.Connection,
+    model_name: str,
 ) -> PipelineResult:
     request_id = str(uuid.uuid4())
     created_at = datetime.now(UTC)
@@ -154,7 +158,7 @@ async def extract(
     )
     page_count = len(normalized.pages)
     cache_key = compute_cache_key(
-        normalized.content_hash, settings.prompt_version, settings.schema_version
+        normalized.content_hash, settings.prompt_version, settings.schema_version, model_name
     )
 
     if settings.cache_enabled:
@@ -202,7 +206,13 @@ async def extract(
 
     if raw is None:
         response = _malformed_response(
-            request_id, created_at, settings, call_result, attempts, error or "unknown error"
+            request_id,
+            created_at,
+            settings,
+            call_result,
+            attempts,
+            error or "unknown error",
+            model_name,
         )
         return PipelineResult(
             response=response,

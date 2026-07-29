@@ -1,4 +1,5 @@
 from app.db import create_api_key, get_request, revoke_api_key
+from app.settings import ModelConfig
 
 
 def test_healthz_is_open(client):
@@ -174,3 +175,73 @@ def test_extract_missing_mock_fixture_returns_unusable_not_500(auth_client, samp
     )
     assert r.status_code == 200
     assert r.json()["status"] == "unusable"
+
+
+def _set_two_models(client) -> None:
+    client.app.state.settings.llm_models = [
+        ModelConfig(name="default-model", price_per_1m_input=0.3, price_per_1m_output=2.5),
+        ModelConfig(name="second-model", price_per_1m_input=0.1, price_per_1m_output=0.2),
+    ]
+
+
+def test_extract_honors_x_model_header(auth_client, sample_jpeg_bytes):
+    _set_two_models(auth_client)
+    r = auth_client.post(
+        "/v1/extract",
+        files={"file": ("i.jpg", sample_jpeg_bytes, "image/jpeg")},
+        headers={"X-Model": "second-model"},
+    )
+    assert r.status_code == 200
+    assert r.json()["usage"]["model"] == "second-model"
+
+
+def test_extract_unrecognized_x_model_falls_back_to_default(auth_client, sample_jpeg_bytes):
+    _set_two_models(auth_client)
+    r = auth_client.post(
+        "/v1/extract",
+        files={"file": ("i.jpg", sample_jpeg_bytes, "image/jpeg")},
+        headers={"X-Model": "bogus-model"},
+    )
+    assert r.status_code == 200
+    assert r.json()["usage"]["model"] == "default-model"
+
+
+def test_list_models_requires_no_auth_even_when_required(client):
+    client.app.state.settings.api_key_required = True
+    _set_two_models(client)
+    r = client.get("/v1/models")
+    assert r.status_code == 200
+
+
+def test_list_models_returns_configured_models_and_prompt_version(client, app_module):
+    _set_two_models(client)
+    r = client.get("/v1/models")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["prompt_version"] == app_module.settings.prompt_version
+    names = {m["name"] for m in body["models"]}
+    assert names == {"default-model", "second-model"}
+    default_flags = {m["name"]: m["is_default"] for m in body["models"]}
+    assert default_flags == {"default-model": True, "second-model": False}
+
+
+def test_list_models_never_leaks_base_url_or_api_key(client):
+    client.app.state.settings.llm_models = [
+        ModelConfig(
+            name="secret-model",
+            price_per_1m_input=0.1,
+            price_per_1m_output=0.2,
+            base_url="https://should-not-leak.example",
+            api_key="sk-super-secret",
+        )
+    ]
+    r = client.get("/v1/models")
+    body_text = r.text
+    assert "should-not-leak" not in body_text
+    assert "sk-super-secret" not in body_text
+    assert set(r.json()["models"][0].keys()) == {
+        "name",
+        "price_per_1m_input",
+        "price_per_1m_output",
+        "is_default",
+    }

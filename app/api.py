@@ -12,7 +12,7 @@ from app.db import insert_request, verify_api_key
 from app.llm import build_client
 from app.normalize.image import SUPPORTED_CONTENT_TYPES, detect_content_type
 from app.pipeline import extract as run_pipeline
-from app.schemas import ExtractionResponse
+from app.schemas import ExtractionResponse, ModelInfo, ModelsResponse
 from app.settings import Settings
 
 router = APIRouter()
@@ -57,11 +57,32 @@ def healthz(request: Request) -> dict:
     return {"status": "ok", "db": db_status}
 
 
+@router.get("/v1/models", response_model=ModelsResponse)
+def list_models(request: Request) -> ModelsResponse:
+    # No auth dependency (like /healthz) -- but ModelInfo deliberately
+    # excludes base_url/api_key so nothing sensitive leaks here.
+    settings: Settings = request.app.state.settings
+    default_name = settings.default_model.name
+    return ModelsResponse(
+        models=[
+            ModelInfo(
+                name=m.name,
+                price_per_1m_input=m.price_per_1m_input,
+                price_per_1m_output=m.price_per_1m_output,
+                is_default=(m.name == default_name),
+            )
+            for m in settings.llm_models
+        ],
+        prompt_version=settings.prompt_version,
+    )
+
+
 @router.post("/v1/extract", response_model=ExtractionResponse)
 async def extract_endpoint(
     request: Request,
     file: UploadFile = File(...),
     x_mock_fixture: str | None = Header(default=None, alias="X-Mock-Fixture"),
+    x_model: str | None = Header(default=None, alias="X-Model"),
     api_key_row: sqlite3.Row | None = Depends(require_api_key),
     tenant_code: str = Depends(get_tenant_code),
 ) -> ExtractionResponse:
@@ -77,7 +98,8 @@ async def extract_endpoint(
     content_type = _resolve_content_type(file.content_type, raw_bytes)
 
     fixture_name = x_mock_fixture if settings.mock_mode and x_mock_fixture else "default"
-    client = build_client(settings, fixture_name=fixture_name)
+    model = settings.resolve_model(x_model)
+    client = build_client(settings, fixture_name=fixture_name, model_name=model.name)
 
     result = await run_pipeline(
         raw_bytes=raw_bytes,
@@ -85,6 +107,7 @@ async def extract_endpoint(
         settings=settings,
         client=client,
         db=db,
+        model_name=model.name,
     )
     response = result.response
     document = response.document

@@ -184,3 +184,22 @@ class ExtractionResponse(BaseModel):
     # from the outgoing response when settings.expose_usage_in_response is
     # false.
     usage: UsageInfo | None
+
+
+# ---- GET /v1/models ----
+#
+# Unauthenticated (like /healthz), so this must never leak `base_url`/
+# `api_key` -- deliberately excluded from the schema, not just omitted by
+# convention.
+
+
+class ModelInfo(BaseModel):
+    name: str
+    price_per_1m_input: float
+    price_per_1m_output: float
+    is_default: bool
+
+
+class ModelsResponse(BaseModel):
+    models: list[ModelInfo]
+    prompt_version: str

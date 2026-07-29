@@ -25,12 +25,13 @@ async def lifespan(app: FastAPI):
     init_db(conn)
     app.state.settings = settings
     app.state.db = conn
-    print(
-        f"model={settings.llm_model} "
-        f"in=${settings.llm_price_per_1m_input}/1M "
-        f"out=${settings.llm_price_per_1m_output}/1M "
-        "source=computed"
+    default_name = settings.default_model.name
+    models_summary = ", ".join(
+        f"{m.name}{' (default)' if m.name == default_name else ''} "
+        f"(in=${m.price_per_1m_input}/1M out=${m.price_per_1m_output}/1M)"
+        for m in settings.llm_models
     )
+    print(f"models: {models_summary}")
     yield
     conn.close()
 

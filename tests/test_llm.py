@@ -1,7 +1,13 @@
 import pytest
 
-from app.llm import MalformedModelOutputError, MockVisionClient, _parse_usage, build_client
-from app.settings import Settings
+from app.llm import (
+    MalformedModelOutputError,
+    MockVisionClient,
+    OpenAICompatibleClient,
+    _parse_usage,
+    build_client,
+)
+from app.settings import ModelConfig, Settings
 
 
 class _FakeUsage:
@@ -12,12 +18,18 @@ class _FakeUsage:
         return self._data
 
 
+def _model(**overrides) -> ModelConfig:
+    defaults = {"name": "test-model", "price_per_1m_input": 1.0, "price_per_1m_output": 2.0}
+    defaults.update(overrides)
+    return ModelConfig(**defaults)
+
+
 def test_parse_usage_computed_when_no_provider_cost():
-    settings = Settings(llm_price_per_1m_input=1.0, llm_price_per_1m_output=2.0)
+    model = _model(price_per_1m_input=1.0, price_per_1m_output=2.0)
     usage = _FakeUsage({"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500})
 
     tokens_in, tokens_out, tokens_total, tokens_cached, cost_usd, cost_source, raw = _parse_usage(
-        usage, settings
+        usage, model
     )
 
     assert (tokens_in, tokens_out, tokens_total, tokens_cached) == (1000, 500, 1500, 0)
@@ -26,19 +38,19 @@ def test_parse_usage_computed_when_no_provider_cost():
 
 
 def test_parse_usage_provider_cost_wins():
-    settings = Settings(llm_price_per_1m_input=1.0, llm_price_per_1m_output=2.0)
+    model = _model(price_per_1m_input=1.0, price_per_1m_output=2.0)
     usage = _FakeUsage(
         {"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500, "cost": 0.0042}
     )
 
-    *_, cost_usd, cost_source, _raw = _parse_usage(usage, settings)
+    *_, cost_usd, cost_source, _raw = _parse_usage(usage, model)
 
     assert cost_source == "provider"
     assert cost_usd == pytest.approx(0.0042)
 
 
 def test_parse_usage_reads_cached_tokens():
-    settings = Settings()
+    model = _model()
     usage = _FakeUsage(
         {
             "prompt_tokens": 1000,
@@ -48,14 +60,14 @@ def test_parse_usage_reads_cached_tokens():
         }
     )
 
-    _, _, _, tokens_cached, *_ = _parse_usage(usage, settings)
+    _, _, _, tokens_cached, *_ = _parse_usage(usage, model)
     assert tokens_cached == 200
 
 
 def test_parse_usage_no_usage_object():
-    settings = Settings()
+    model = _model()
     tokens_in, tokens_out, tokens_total, tokens_cached, cost_usd, cost_source, raw = _parse_usage(
-        None, settings
+        None, model
     )
     assert (tokens_in, tokens_out, tokens_total, tokens_cached) == (0, 0, 0, 0)
     assert cost_usd == 0.0
@@ -75,6 +87,23 @@ async def test_mock_client_returns_fixture_content():
 
 async def test_mock_client_missing_fixture_raises():
     settings = Settings(mock_mode=True)
-    client = MockVisionClient(settings, "does-not-exist")
+    client = MockVisionClient(settings, "does-not-exist", _model())
     with pytest.raises(MalformedModelOutputError):
         await client.extract(images=[], prompt="p")
+
+
+def test_model_override_uses_own_base_url_and_api_key():
+    settings = Settings(llm_base_url="https://shared.example/v1", llm_api_key="shared-key")
+    overridden = _model(base_url="https://own.example/v1", api_key="own-key")
+    client = OpenAICompatibleClient(settings, overridden)
+
+    assert str(client._client.base_url) == "https://own.example/v1/"
+    assert client._client.api_key == "own-key"
+
+
+def test_model_without_override_falls_back_to_shared_settings():
+    settings = Settings(llm_base_url="https://shared.example/v1", llm_api_key="shared-key")
+    client = OpenAICompatibleClient(settings, _model())
+
+    assert str(client._client.base_url) == "https://shared.example/v1/"
+    assert client._client.api_key == "shared-key"

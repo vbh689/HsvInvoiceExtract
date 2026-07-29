@@ -461,6 +461,8 @@ def _extract_ctx(**overrides) -> dict:
         "fixture_names": [],
         "uploaded_file_name": None,
         "uploaded_data_url": None,
+        "available_models": [],
+        "default_model_name": None,
     }
     ctx.update(overrides)
     return ctx
@@ -480,7 +482,12 @@ async def extract_form(request: Request):
     return templates.TemplateResponse(
         request,
         "extract.html",
-        _extract_ctx(fixture_names=_fixture_names(settings), mock_mode=settings.mock_mode),
+        _extract_ctx(
+            fixture_names=_fixture_names(settings),
+            mock_mode=settings.mock_mode,
+            available_models=settings.llm_models,
+            default_model_name=settings.default_model.name,
+        ),
     )
 
 
@@ -489,10 +496,13 @@ async def extract_submit(
     request: Request,
     file: UploadFile = File(...),
     fixture_name: str = Form(default="default"),
+    model_name: str = Form(default=""),
 ):
     settings: Settings = request.app.state.settings
     db: sqlite3.Connection = request.app.state.db
     fixture_names = _fixture_names(settings)
+    available_models = settings.llm_models
+    default_model_name = settings.default_model.name
 
     if file.content_type not in SUPPORTED_CONTENT_TYPES:
         return templates.TemplateResponse(
@@ -502,6 +512,8 @@ async def extract_submit(
                 error=f"Unsupported content type: {file.content_type}",
                 fixture_names=fixture_names,
                 mock_mode=settings.mock_mode,
+                available_models=available_models,
+                default_model_name=default_model_name,
             ),
             status_code=415,
         )
@@ -512,7 +524,11 @@ async def extract_submit(
             request,
             "extract.html",
             _extract_ctx(
-                error="Empty file", fixture_names=fixture_names, mock_mode=settings.mock_mode
+                error="Empty file",
+                fixture_names=fixture_names,
+                mock_mode=settings.mock_mode,
+                available_models=available_models,
+                default_model_name=default_model_name,
             ),
             status_code=400,
         )
@@ -525,12 +541,15 @@ async def extract_submit(
                 error=f"File exceeds maximum upload size ({limit_mb} MB)",
                 fixture_names=fixture_names,
                 mock_mode=settings.mock_mode,
+                available_models=available_models,
+                default_model_name=default_model_name,
             ),
             status_code=413,
         )
 
     chosen_fixture = fixture_name if (settings.mock_mode and fixture_name) else "default"
-    client = build_client(settings, fixture_name=chosen_fixture)
+    model = settings.resolve_model(model_name or None)
+    client = build_client(settings, fixture_name=chosen_fixture, model_name=model.name)
 
     result = await run_pipeline(
         raw_bytes=raw_bytes,
@@ -538,6 +557,7 @@ async def extract_submit(
         settings=settings,
         client=client,
         db=db,
+        model_name=model.name,
     )
     response = result.response
 
@@ -593,5 +613,7 @@ async def extract_submit(
             mock_mode=settings.mock_mode,
             uploaded_file_name=file.filename,
             uploaded_data_url=uploaded_data_url,
+            available_models=available_models,
+            default_model_name=default_model_name,
         ),
     )

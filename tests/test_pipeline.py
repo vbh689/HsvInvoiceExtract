@@ -95,9 +95,14 @@ def image_bytes() -> bytes:
     return buf.getvalue()
 
 
-async def _run(settings, client, db, image_bytes):
+async def _run(settings, client, db, image_bytes, model_name="fake-model"):
     return await extract(
-        raw_bytes=image_bytes, content_type="image/jpeg", settings=settings, client=client, db=db
+        raw_bytes=image_bytes,
+        content_type="image/jpeg",
+        settings=settings,
+        client=client,
+        db=db,
+        model_name=model_name,
     )
 
 
@@ -199,11 +204,29 @@ async def test_cache_disabled_never_stores_or_reads(db, image_bytes):
 
 
 def test_compute_cache_key_is_deterministic():
-    a = compute_cache_key("abc123", "extract_v2", "v2")
-    b = compute_cache_key("abc123", "extract_v2", "v2")
-    c = compute_cache_key("abc123", "extract_v2", "v3")
+    a = compute_cache_key("abc123", "extract_v2", "v2", "gemini-3.5-flash-lite")
+    b = compute_cache_key("abc123", "extract_v2", "v2", "gemini-3.5-flash-lite")
+    c = compute_cache_key("abc123", "extract_v2", "v3", "gemini-3.5-flash-lite")
     assert a == b
     assert a != c
+
+
+def test_compute_cache_key_differs_by_model():
+    a = compute_cache_key("abc123", "extract_v2", "v2", "gemini-3.5-flash-lite")
+    b = compute_cache_key("abc123", "extract_v2", "v2", "gpt-4o-mini")
+    assert a != b
+
+
+async def test_same_bytes_different_model_is_not_a_cache_hit(db, image_bytes):
+    settings = Settings(cache_enabled=True)
+    client = FakeClient([_call_result(VALID_RAW_JSON), _call_result(VALID_RAW_JSON)])
+
+    first = await _run(settings, client, db, image_bytes, model_name="model-a")
+    assert first.cache_hit is False
+
+    second = await _run(settings, client, db, image_bytes, model_name="model-b")
+    assert second.cache_hit is False
+    assert client.calls == 2
 
 
 def test_cache_get_expires_past_ttl(db):

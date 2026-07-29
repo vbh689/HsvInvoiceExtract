@@ -8,6 +8,14 @@
 {% endif %}
 
 <form method="post" action="/dashboard/extract" enctype="multipart/form-data">
+    <div class="form-row">
+        <label class="form-label" for="model_name">Model</label>
+        <select name="model_name" id="model_name" class="form-select">
+            {% for model in available_models %}
+            <option value="{{ model.name }}" {% if model.name == default_model_name %}selected{% endif %}>{{ model.name }} (${{ model.price_per_1m_input }}/${{ model.price_per_1m_output }} per 1M)</option>
+            {% endfor %}
+        </select>
+    </div>
     {% if mock_mode %}
     <div class="form-row">
         <label class="form-label" for="fixture_name">Mock fixture</label>

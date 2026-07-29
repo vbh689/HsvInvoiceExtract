@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.db import cache_get, cache_set, list_api_keys
+from app.settings import ModelConfig
 
 
 @pytest.fixture
@@ -267,6 +268,39 @@ def test_extract_submit_runs_pipeline_and_logs_history(
     ).fetchone()
     assert row["source"] == "dashboard"
     assert row["api_key_label"] == "dashboard-test"
+
+
+def _set_two_models(dash_client) -> None:
+    dash_client.app.state.settings.llm_models = [
+        ModelConfig(name="default-model", price_per_1m_input=0.3, price_per_1m_output=2.5),
+        ModelConfig(name="second-model", price_per_1m_input=0.1, price_per_1m_output=0.2),
+    ]
+
+
+def test_extract_page_renders_model_dropdown_with_default_selected(authed_client, dash_client):
+    _set_two_models(dash_client)
+    r = authed_client.get("/dashboard/extract")
+    assert r.status_code == 200
+    assert "default-model" in r.text
+    assert "second-model" in r.text
+    assert 'value="default-model" selected' in r.text
+
+
+def test_extract_submit_non_default_model_flows_through(
+    authed_client, dash_client, sample_jpeg_bytes
+):
+    _set_two_models(dash_client)
+    r = authed_client.post(
+        "/dashboard/extract",
+        data={"fixture_name": "pretax_basic", "model_name": "second-model"},
+        files={"file": ("invoice.jpg", sample_jpeg_bytes, "image/jpeg")},
+    )
+    assert r.status_code == 200
+
+    row = dash_client.app.state.db.execute(
+        "SELECT model FROM requests ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    assert row["model"] == "second-model"
 
 
 def test_tenants_page_renders(authed_client):
