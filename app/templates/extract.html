@@ -18,8 +18,8 @@
         </select>
     </div>
     {% endif %}
-    <div class="drop-zone" onclick="document.getElementById('file').click()">
-        <div class="drop-text" id="drop-text">Click to choose a file</div>
+    <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file').click()">
+        <div class="drop-text" id="drop-text">Click to choose a file, or drag and drop it here</div>
         <div class="drop-hint">JPEG, PNG, WEBP, HEIC, or PDF</div>
         <input type="file" id="file" name="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf" required>
     </div>
@@ -96,15 +96,18 @@
 
 {% block scripts %}
 <script>
-document.getElementById('file').addEventListener('change', function () {
-    const file = this.files[0];
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file');
+
+function updatePreview() {
+    const file = fileInput.files[0];
     const dropText = document.getElementById('drop-text');
     const previewSection = document.getElementById('client-preview');
     const previewImg = document.getElementById('client-preview-img');
     const pdfHint = document.getElementById('client-preview-pdf-hint');
 
     if (!file) {
-        dropText.textContent = 'Click to choose a file';
+        dropText.textContent = 'Click to choose a file, or drag and drop it here';
         previewSection.style.display = 'none';
         return;
     }
@@ -121,6 +124,36 @@ document.getElementById('file').addEventListener('change', function () {
         previewImg.src = URL.createObjectURL(file);
         previewImg.alt = file.name;
         previewImg.style.display = '';
+    }
+}
+
+fileInput.addEventListener('change', updatePreview);
+
+['dragenter', 'dragover'].forEach(function (eventName) {
+    dropZone.addEventListener(eventName, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('drop-zone-active');
+    });
+});
+
+['dragleave', 'dragend'].forEach(function (eventName) {
+    dropZone.addEventListener(eventName, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drop-zone-active');
+    });
+});
+
+dropZone.addEventListener('drop', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dropZone.classList.remove('drop-zone-active');
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        fileInput.files = files;
+        updatePreview();
     }
 });
 </script>
