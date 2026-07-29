@@ -41,9 +41,11 @@ guessed.
 ## Pipeline
 
 ```
-POST /v1/extract (gated by X-API-Key)
+POST /v1/extract (gated by X-API-Key, unless API_KEY_REQUIRED=false)
+  -> resolve model (X-Model header; an unknown name falls back to the default)
   -> normalize (EXIF correction, downscale to JPEG, PDF->image render)
-  -> cache (sha256 of normalized bytes + prompt_version + schema_version)
+  -> cache (sha256 of normalized bytes + prompt_version + schema_version
+            + model name + reasoning effort)
   -> call model; one retry on a dead/malformed attempt only
       -> validate & reconcile (app/validation/)
   -> response (always the best attempt, never empty)
@@ -65,12 +67,14 @@ function.
 | `app/schemas.py` | `RawExtraction` (model-transcribed strings) vs `ExtractionResponse` (API contract with computed ints) |
 | `app/normalize/` | Image/PDF normalization + deterministic VN number parsing |
 | `app/validation/` | Reconciliation (`reconcile.py`) and confidence/status derivation (`confidence.py`) — the validated core, ported near-verbatim |
-| `app/api.py` | `POST /v1/extract`, `GET /healthz` |
-| `app/dashboard.py` | All `/dashboard` routes — session-cookie login, overview + charts, logs, keys, per-key stats, operator test-upload |
+| `app/api.py` | `POST /v1/extract`, `POST /v1/purge-cache`, `GET /healthz`, `GET /v1/models`, `GET /v1/stats` |
+| `app/dashboard.py` | All `/dashboard` routes — session-cookie login, overview + charts, statistics + CSV exports, logs, keys, per-key stats, tenants, cache purge, operator test-upload, rendered API docs |
 | `app/stats.py` | Time-period resolution + SQL aggregation queries backing the dashboard |
 
-Everything the runtime reads lives under `app/` or `prompts/` — nothing else
-is needed inside the container.
+Everything the runtime reads lives under `app/`, `prompts/`, `docs/API.md`
+(rendered at `/dashboard/api-docs`) or `tests/fixtures/mock_responses/`
+(mock mode) — those four are exactly what the Dockerfile copies, and nothing
+else is needed inside the container.
 
 ## Quickstart
 
@@ -85,17 +89,20 @@ uv run ruff check .
 uv run ruff format --check .
 
 # Run the service
+# `python -m app.main` (not `uvicorn app.main:app`) so HOST/PORT/LOG_LEVEL
+# from .env are honored instead of uvicorn's own hardcoded defaults.
 cp .env.example .env   # edit LLM_API_KEY / DASHBOARD_PASSWORD as needed
-uv run uvicorn app.main:app --reload
+uv run python -m app.main
 ```
 
 ### Try it in mock mode
 
 ```bash
-MOCK_MODE=true DASHBOARD_PASSWORD=devpass uv run uvicorn app.main:app --reload
+MOCK_MODE=true DASHBOARD_PASSWORD=devpass uv run python -m app.main
 ```
 
-`/v1/extract` always requires a valid API key. Log into the dashboard at
+`/v1/extract` requires a valid API key unless `API_KEY_REQUIRED=false` (in
+which case `X-API-Key` isn't inspected at all). Log into the dashboard at
 `http://localhost:8000/dashboard/login` with `DASHBOARD_PASSWORD`, create a
 key from the API Keys page, then:
 
@@ -113,10 +120,14 @@ reconciling invoice, so a mock-mode request always gets a sensible response.
 
 ### Run against a real provider
 
-Set `MOCK_MODE=false` and fill in `LLM_BASE_URL` / `LLM_API_KEY` /
-`LLM_MODEL` in `.env` (see `.env.example` for two worked examples: Gemini
-and OpenRouter). Any OpenAI-compatible Chat Completions endpoint works — the
-client (`app/llm.py`) never hardcodes a provider.
+Set `MOCK_MODE=false` and fill in `LLM_BASE_URL` / `LLM_API_KEY` plus at
+least one numbered model slot — `LLM_MODEL_1` with its `_PRICE_IN` /
+`_PRICE_OUT`, and optional `_BASE_URL` / `_API_KEY` / `_REASONING_EFFORT`
+overrides (there is no bare `LLM_MODEL` var). See `.env.example` for worked
+Gemini, OpenRouter and OpenAI slots. `LLM_MODEL_1` is the default model;
+callers pick another with the `X-Model` header, and `GET /v1/models` lists
+what's configured. Any OpenAI-compatible Chat Completions endpoint works —
+the client (`app/llm.py`) never hardcodes a provider.
 
 ## Docs
 
