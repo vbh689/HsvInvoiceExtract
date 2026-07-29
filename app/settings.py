@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # ---- Mode ----
     mock_mode: bool = False
     app_timezone: str = "Asia/Ho_Chi_Minh"
+    expose_usage_in_response: bool = True  # false = omit `usage` from /v1/extract responses
 
     # ---- The one model ----
     llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"

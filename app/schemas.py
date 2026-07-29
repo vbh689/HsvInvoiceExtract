@@ -180,4 +180,7 @@ class ExtractionResponse(BaseModel):
     line_items: list[LineItemResult] = Field(default_factory=list)
     # Flattened: one array. Document-level findings have line_no: None.
     findings: list[Finding] = Field(default_factory=list)
-    usage: UsageInfo
+    # Populated internally for audit-log bookkeeping; app.api may omit it
+    # from the outgoing response when settings.expose_usage_in_response is
+    # false.
+    usage: UsageInfo | None

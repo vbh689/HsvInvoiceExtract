@@ -134,4 +134,6 @@ async def extract_endpoint(
         },
     )
 
+    if not settings.expose_usage_in_response:
+        response = response.model_copy(update={"usage": None})
     return response

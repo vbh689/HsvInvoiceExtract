@@ -60,6 +60,19 @@ def test_extract_happy_path_with_default_fixture(auth_client, sample_jpeg_bytes)
     assert body["usage"]["attempts"] == 1
 
 
+def test_extract_omits_usage_when_disabled(auth_client, sample_jpeg_bytes):
+    auth_client.app.state.settings.expose_usage_in_response = False
+    r = auth_client.post("/v1/extract", files={"file": ("i.jpg", sample_jpeg_bytes, "image/jpeg")})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["usage"] is None
+
+    # Audit log / dashboard still get full usage regardless of the toggle.
+    logged = get_request(auth_client.app.state.db, body["request_id"])
+    assert logged["model"] is not None
+    assert logged["tokens_total"] > 0
+
+
 def test_extract_reports_cost_vnd_from_configured_rate(auth_client, sample_jpeg_bytes, app_module):
     r = auth_client.post("/v1/extract", files={"file": ("i.jpg", sample_jpeg_bytes, "image/jpeg")})
     usage = r.json()["usage"]
