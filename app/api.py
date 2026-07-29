@@ -22,13 +22,20 @@ _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 def require_api_key(
     request: Request, api_key: str | None = Depends(_api_key_header)
-) -> sqlite3.Row:
+) -> sqlite3.Row | None:
+    settings: Settings = request.app.state.settings
+    if not settings.api_key_required:
+        return None
     if not api_key:
         raise HTTPException(status_code=401, detail="missing X-API-Key header")
     row = verify_api_key(request.app.state.db, api_key)
     if row is None:
         raise HTTPException(status_code=401, detail="invalid or revoked API key")
     return row
+
+
+def get_tenant_code(tenant_code: str | None = Header(default=None, alias="tenant_code")) -> str:
+    return tenant_code.strip() if tenant_code and tenant_code.strip() else "1"
 
 
 def _resolve_content_type(declared: str | None, raw_bytes: bytes) -> str:
@@ -55,7 +62,8 @@ async def extract_endpoint(
     request: Request,
     file: UploadFile = File(...),
     x_mock_fixture: str | None = Header(default=None, alias="X-Mock-Fixture"),
-    api_key_row: sqlite3.Row = Depends(require_api_key),
+    api_key_row: sqlite3.Row | None = Depends(require_api_key),
+    tenant_code: str = Depends(get_tenant_code),
 ) -> ExtractionResponse:
     settings: Settings = request.app.state.settings
     db: sqlite3.Connection = request.app.state.db
@@ -104,9 +112,10 @@ async def extract_endpoint(
         {
             "request_id": response.request_id,
             "created_at": response.created_at.isoformat(),
-            "api_key_id": api_key_row["id"],
-            "api_key_label": api_key_row["label"],
+            "api_key_id": api_key_row["id"] if api_key_row else None,
+            "api_key_label": api_key_row["label"] if api_key_row else None,
             "source": "api",
+            "tenant_code": tenant_code,
             "filename": file.filename,
             "content_type": content_type,
             "file_bytes": len(raw_bytes),

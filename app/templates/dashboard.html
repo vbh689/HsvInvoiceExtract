@@ -31,6 +31,7 @@
     <div class="chart-card chart-card-sm"><canvas id="chart-status"></canvas></div>
     <div class="chart-card"><canvas id="chart-findings"></canvas></div>
     <div class="chart-card"><canvas id="chart-keys"></canvas></div>
+    <div class="chart-card"><canvas id="chart-tenants"></canvas></div>
 </div>
 
 <div class="section-header"><h2>Recent requests</h2></div>
@@ -138,6 +139,15 @@ function renderCharts(data) {
             datasets: [{label: "requests", data: data.requests_by_key.map(r => r.count), backgroundColor: "#6366f1"}],
         },
         options: {indexAxis: "y", responsive: true, plugins: {title: {display: true, text: "Requests by API key", color: "#f8fafc"}, legend: {display: false}}, scales: {x: {ticks: {color: "#94a3b8"}}, y: {ticks: {color: "#94a3b8"}}}},
+    });
+
+    new Chart(document.getElementById("chart-tenants"), {
+        type: "bar",
+        data: {
+            labels: data.requests_by_tenant.map(r => r.tenant_code),
+            datasets: [{label: "requests", data: data.requests_by_tenant.map(r => r.count), backgroundColor: "#34d399"}],
+        },
+        options: {indexAxis: "y", responsive: true, plugins: {title: {display: true, text: "Requests by tenant", color: "#f8fafc"}, legend: {display: false}}, scales: {x: {ticks: {color: "#94a3b8"}}, y: {ticks: {color: "#94a3b8"}}}},
     });
 }
 </script>

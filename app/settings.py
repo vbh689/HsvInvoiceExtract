@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     status_threshold_usable: float = 0.75
     status_threshold_review: float = 0.35
 
+    # ---- Auth ----
+    api_key_required: bool = True  # false = /v1/extract never inspects X-API-Key at all
+
     # ---- Dashboard ----
     # No default: login always fails until this is explicitly set.
     dashboard_password: str | None = None

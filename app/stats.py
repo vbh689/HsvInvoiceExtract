@@ -360,16 +360,137 @@ def recent_requests(
     end_utc: datetime | None,
     *,
     api_key_id: str | None = None,
+    tenant_code: str | None = None,
     limit: int = 20,
 ) -> list[sqlite3.Row]:
     where, params = _where_clause(start_utc, end_utc)
     if api_key_id is not None:
         where = f"{where} AND api_key_id = ?" if where else "WHERE api_key_id = ?"
         params = [*params, api_key_id]
+    if tenant_code is not None:
+        where = f"{where} AND tenant_code = ?" if where else "WHERE tenant_code = ?"
+        params = [*params, tenant_code]
     return conn.execute(
         f"SELECT * FROM requests {where} ORDER BY created_at DESC LIMIT ?",
         [*params, limit],
     ).fetchall()
+
+
+# ---- Tenants ----
+# Mirrors of the api_key_id-based functions above, but grouped/filtered by
+# tenant_code -- a separate dimension from API key (see plan doc), applies
+# whether or not API-key auth is enabled.
+
+
+def requests_by_tenant(
+    conn: sqlite3.Connection, start_utc: datetime | None, end_utc: datetime | None
+) -> list[dict]:
+    where, params = _where_clause(start_utc, end_utc)
+    rows = conn.execute(
+        f"""
+        SELECT tenant_code, COUNT(*) AS count
+        FROM requests
+        {where}
+        GROUP BY tenant_code
+        ORDER BY count DESC
+        """,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def tenant_stats(
+    conn: sqlite3.Connection,
+    tenant_code: str,
+    start_utc: datetime | None,
+    end_utc: datetime | None,
+) -> dict:
+    where, params = _where_clause(start_utc, end_utc)
+    tenant_clause = "tenant_code = ?"
+    where = f"{where} AND {tenant_clause}" if where else f"WHERE {tenant_clause}"
+    params = [*params, tenant_code]
+
+    row = conn.execute(
+        f"""
+        SELECT
+            COUNT(*) AS total_requests,
+            SUM(CASE WHEN status = 'usable' THEN 1 ELSE 0 END) AS usable_count,
+            SUM(CASE WHEN status = 'needs_human_review' THEN 1 ELSE 0 END) AS review_count,
+            SUM(CASE WHEN status = 'unusable' THEN 1 ELSE 0 END) AS unusable_count,
+            AVG(confidence) AS avg_confidence,
+            SUM(CASE WHEN cache_hit = 0 THEN tokens_in ELSE 0 END) AS tokens_in,
+            SUM(CASE WHEN cache_hit = 0 THEN tokens_out ELSE 0 END) AS tokens_out,
+            SUM(CASE WHEN cache_hit = 0 THEN tokens_total ELSE 0 END) AS tokens_total,
+            SUM(CASE WHEN cache_hit = 0 THEN cost_usd ELSE 0 END) AS total_cost_usd,
+            SUM(CASE WHEN cache_hit = 0 THEN latency_ms ELSE 0 END) AS billed_latency_sum,
+            SUM(CASE WHEN cache_hit = 1 THEN 1 ELSE 0 END) AS cache_hits,
+            MIN(created_at) AS first_used_at,
+            MAX(created_at) AS last_used_at
+        FROM requests
+        {where}
+        """,
+        params,
+    ).fetchone()
+
+    total = row["total_requests"] or 0
+    billed = total - (row["cache_hits"] or 0)
+    return {
+        "total_requests": total,
+        "status_counts": {
+            "usable": row["usable_count"] or 0,
+            "needs_human_review": row["review_count"] or 0,
+            "unusable": row["unusable_count"] or 0,
+        },
+        "avg_confidence": row["avg_confidence"] or 0.0,
+        "tokens_in": row["tokens_in"] or 0,
+        "tokens_out": row["tokens_out"] or 0,
+        "tokens_total": row["tokens_total"] or 0,
+        "total_cost_usd": row["total_cost_usd"] or 0.0,
+        "avg_latency_ms": (row["billed_latency_sum"] or 0.0) / billed if billed else 0.0,
+        "cache_hit_rate": (row["cache_hits"] or 0) / total if total else 0.0,
+        "first_used_at": row["first_used_at"],
+        "last_used_at": row["last_used_at"],
+    }
+
+
+def requests_by_tenant_stats(
+    conn: sqlite3.Connection, start_utc: datetime | None, end_utc: datetime | None
+) -> list[dict]:
+    """Fuller per-tenant breakdown than `requests_by_tenant` (count-only) --
+    adds avg confidence, cost, latency, and cache-hit rate for the
+    Statistics page's per-tenant table and CSV export.
+    """
+    where, params = _where_clause(start_utc, end_utc)
+    rows = conn.execute(
+        f"""
+        SELECT
+            tenant_code,
+            COUNT(*) AS count,
+            AVG(confidence) AS avg_confidence,
+            SUM(CASE WHEN cache_hit = 0 THEN cost_usd ELSE 0 END) AS total_cost_usd,
+            AVG(CASE WHEN cache_hit = 0 THEN latency_ms END) AS avg_latency_ms,
+            SUM(CASE WHEN cache_hit = 1 THEN 1 ELSE 0 END) AS cache_hits
+        FROM requests
+        {where}
+        GROUP BY tenant_code
+        ORDER BY count DESC
+        """,
+        params,
+    ).fetchall()
+    results = []
+    for row in rows:
+        count = row["count"] or 0
+        results.append(
+            {
+                "tenant_code": row["tenant_code"],
+                "count": count,
+                "avg_confidence": row["avg_confidence"] or 0.0,
+                "total_cost_usd": row["total_cost_usd"] or 0.0,
+                "avg_latency_ms": row["avg_latency_ms"] or 0.0,
+                "cache_hit_rate": (row["cache_hits"] or 0) / count if count else 0.0,
+            }
+        )
+    return results
 
 
 # ---- Statistics page ----

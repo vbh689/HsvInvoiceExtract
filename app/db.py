@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS requests (
     api_key_id     TEXT REFERENCES api_keys(id),
     api_key_label  TEXT,
     source         TEXT NOT NULL,
+    tenant_code    TEXT NOT NULL DEFAULT '1',
 
     filename       TEXT,
     content_type   TEXT,
@@ -59,6 +60,7 @@ CREATE TABLE IF NOT EXISTS requests (
 CREATE INDEX IF NOT EXISTS idx_requests_created  ON requests(created_at);
 CREATE INDEX IF NOT EXISTS idx_requests_key_time ON requests(api_key_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_requests_status   ON requests(status);
+CREATE INDEX IF NOT EXISTS idx_requests_tenant_time ON requests(tenant_code, created_at);
 
 CREATE TABLE IF NOT EXISTS extraction_cache (
     cache_key     TEXT PRIMARY KEY,
@@ -80,6 +82,14 @@ def get_connection(settings: Settings) -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
+    # `CREATE TABLE IF NOT EXISTS` alone won't add a column to an
+    # already-created prod `requests` table -- migrate it first. On a fresh
+    # DB `PRAGMA table_info` returns no rows (table doesn't exist yet), so
+    # `cols` is empty and this is a deliberate no-op: the column then arrives
+    # for free via the CREATE TABLE below.
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(requests)")}
+    if cols and "tenant_code" not in cols:
+        conn.execute("ALTER TABLE requests ADD COLUMN tenant_code TEXT NOT NULL DEFAULT '1'")
     conn.executescript(SCHEMA)
     conn.commit()
 
@@ -146,7 +156,7 @@ def insert_request(conn: sqlite3.Connection, row: dict) -> None:
     conn.execute(
         """
         INSERT INTO requests (
-            request_id, created_at, api_key_id, api_key_label, source,
+            request_id, created_at, api_key_id, api_key_label, source, tenant_code,
             filename, content_type, file_bytes, page_count,
             status, confidence, price_basis, line_count, grand_total,
             cache_hit, model, attempt_count, latency_ms,
@@ -154,7 +164,7 @@ def insert_request(conn: sqlite3.Connection, row: dict) -> None:
             cost_usd, cost_source, usage_json,
             response_json, error
         ) VALUES (
-            :request_id, :created_at, :api_key_id, :api_key_label, :source,
+            :request_id, :created_at, :api_key_id, :api_key_label, :source, :tenant_code,
             :filename, :content_type, :file_bytes, :page_count,
             :status, :confidence, :price_basis, :line_count, :grand_total,
             :cache_hit, :model, :attempt_count, :latency_ms,

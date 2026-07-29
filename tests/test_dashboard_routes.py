@@ -38,7 +38,13 @@ def test_unauthenticated_overview_redirects_to_login(dash_client):
 
 
 def test_unauthenticated_logs_and_keys_redirect_to_login(dash_client):
-    paths = ["/dashboard/logs", "/dashboard/keys", "/dashboard/extract", "/dashboard/statistics"]
+    paths = [
+        "/dashboard/logs",
+        "/dashboard/keys",
+        "/dashboard/extract",
+        "/dashboard/statistics",
+        "/dashboard/tenants",
+    ]
     for path in paths:
         r = dash_client.get(path, follow_redirects=False)
         assert r.status_code == 303
@@ -107,6 +113,7 @@ def test_chart_data_endpoint_shape(authed_client):
         "status_breakdown",
         "findings_by_code",
         "requests_by_key",
+        "requests_by_tenant",
     }
     assert body["bucket"] in {"hour", "day", "month"}
     assert isinstance(body["requests_over_time"], list)
@@ -252,6 +259,46 @@ def test_extract_submit_runs_pipeline_and_logs_history(
     ).fetchone()
     assert row["source"] == "dashboard"
     assert row["api_key_label"] == "dashboard-test"
+
+
+def test_tenants_page_renders(authed_client):
+    r = authed_client.get("/dashboard/tenants")
+    assert r.status_code == 200
+    assert "Tenants" in r.text
+
+
+def test_tenant_detail_page_renders_stats(authed_client, dash_client, sample_jpeg_bytes):
+    authed_client.post(
+        "/dashboard/extract",
+        data={"fixture_name": "pretax_basic"},
+        files={"file": ("invoice.jpg", sample_jpeg_bytes, "image/jpeg")},
+    )
+
+    r = authed_client.get("/dashboard/tenants/1")
+    assert r.status_code == 200
+    assert "Tenant: 1" in r.text
+
+
+def test_statistics_export_by_tenant_csv_returns_one_row_per_tenant(
+    authed_client, dash_client, sample_jpeg_bytes
+):
+    authed_client.post(
+        "/dashboard/extract",
+        data={"fixture_name": "pretax_basic"},
+        files={"file": ("invoice.jpg", sample_jpeg_bytes, "image/jpeg")},
+    )
+
+    r = authed_client.get("/dashboard/statistics/export_by_tenant.csv?period=all")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    assert "attachment" in r.headers["content-disposition"]
+
+    lines = r.text.strip().splitlines()
+    assert lines[0] == (
+        "tenant_code,request_count,avg_confidence,total_cost_usd,avg_latency_ms,cache_hit_rate"
+    )
+    assert len(lines) == 2
+    assert lines[1].startswith("1,")
 
 
 def test_no_page_leaks_raw_provider_key(authed_client, dash_client, sample_jpeg_bytes):

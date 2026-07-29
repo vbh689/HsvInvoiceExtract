@@ -74,6 +74,30 @@
     </table>
 </div>
 
+<div class="section-header" style="display: flex; align-items: center; justify-content: space-between;">
+    <h2>Requests by tenant</h2>
+    <a class="btn btn-sm btn-ghost" href="/dashboard/statistics/export_by_tenant.csv?{{ request.url.query }}">Export CSV</a>
+</div>
+<div class="table-card">
+    <table>
+        <thead><tr><th>Tenant</th><th>Requests</th><th>Avg confidence</th><th>Cost</th><th>Avg latency</th><th>Cache hit rate</th></tr></thead>
+        <tbody>
+        {% for row in by_tenant %}
+            <tr>
+                <td>{{ row.tenant_code }}</td>
+                <td>{{ row.count }}</td>
+                <td>{{ "%.1f"|format(row.avg_confidence * 100) }}%</td>
+                <td>${{ "%.4f"|format(row.total_cost_usd) }} (₫{{ "{:,.0f}".format(row.total_cost_usd * vnd_rate) }})</td>
+                <td>{{ "%.0f"|format(row.avg_latency_ms) }} ms</td>
+                <td>{{ "%.1f"|format(row.cache_hit_rate * 100) }}%</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="6">No requests in this period.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
 {% endblock %}
 
 {% block scripts %}

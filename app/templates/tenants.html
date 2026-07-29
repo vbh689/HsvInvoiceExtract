@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Tenants — HSV Invoice Extraction{% endblock %}
+{% block page_heading %}Tenants{% endblock %}
+{% block content %}
+
+<div class="table-card">
+    <table>
+        <thead><tr><th>Tenant</th><th>Requests</th></tr></thead>
+        <tbody>
+        {% for row in records %}
+            <tr>
+                <td><a href="/dashboard/tenants/{{ row['tenant_code'] }}">{{ row["tenant_code"] }}</a></td>
+                <td>{{ row["count"] }}</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="2">No requests yet.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

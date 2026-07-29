@@ -50,10 +50,13 @@ from app.stats import (
     requests_by_key,
     requests_by_key_stats,
     requests_by_model,
+    requests_by_tenant,
+    requests_by_tenant_stats,
     requests_over_time,
     resolve_period,
     statistics_tiles,
     status_breakdown,
+    tenant_stats,
     tokens_over_time,
 )
 
@@ -154,6 +157,7 @@ async def chart_data(request: Request):
             "status_breakdown": status_breakdown(db, start, end),
             "findings_by_code": findings_by_code(db, start, end),
             "requests_by_key": requests_by_key(db, start, end),
+            "requests_by_tenant": requests_by_tenant(db, start, end),
         }
     )
 
@@ -175,6 +179,7 @@ async def statistics(request: Request):
             "keys_summary": api_key_summary(db),
             "by_model": requests_by_model(db, start, end),
             "by_key": requests_by_key_stats(db, start, end),
+            "by_tenant": requests_by_tenant_stats(db, start, end),
             "filter_meta": meta,
             "mock_mode": request.app.state.settings.mock_mode,
         },
@@ -232,6 +237,44 @@ async def statistics_export_csv(request: Request):
         )
 
     filename = f"statistics-by-key-{meta['period']}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/statistics/export_by_tenant.csv")
+async def statistics_export_by_tenant_csv(request: Request):
+    db: sqlite3.Connection = request.app.state.db
+    start, end, meta = _resolve(request)
+    rows = requests_by_tenant_stats(db, start, end)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        [
+            "tenant_code",
+            "request_count",
+            "avg_confidence",
+            "total_cost_usd",
+            "avg_latency_ms",
+            "cache_hit_rate",
+        ]
+    )
+    for r in rows:
+        writer.writerow(
+            [
+                r["tenant_code"],
+                r["count"],
+                r["avg_confidence"],
+                r["total_cost_usd"],
+                r["avg_latency_ms"],
+                r["cache_hit_rate"],
+            ]
+        )
+
+    filename = f"statistics-by-tenant-{meta['period']}.csv"
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="text/csv",
@@ -351,6 +394,43 @@ async def key_detail(request: Request, key_id: str):
     )
 
 
+# ---- Tenants ----
+
+
+@router.get("/tenants")
+async def tenants_page(request: Request):
+    db: sqlite3.Connection = request.app.state.db
+    start, end, _ = resolve_period("all", None, None, datetime.now(UTC))
+    records = requests_by_tenant(db, start, end)
+    return templates.TemplateResponse(
+        request,
+        "tenants.html",
+        {
+            "records": records,
+            "mock_mode": request.app.state.settings.mock_mode,
+        },
+    )
+
+
+@router.get("/tenants/{tenant_code}")
+async def tenant_detail(request: Request, tenant_code: str):
+    db: sqlite3.Connection = request.app.state.db
+    start, end, meta = _resolve(request)
+    stats = tenant_stats(db, tenant_code, start, end)
+    recent = recent_requests(db, start, end, tenant_code=tenant_code, limit=20)
+    return templates.TemplateResponse(
+        request,
+        "tenant_detail.html",
+        {
+            "tenant_code": tenant_code,
+            "stats": stats,
+            "recent": recent,
+            "filter_meta": meta,
+            "mock_mode": request.app.state.settings.mock_mode,
+        },
+    )
+
+
 # ---- Operator test-upload page ----
 
 
@@ -450,6 +530,7 @@ async def extract_submit(
             "api_key_id": None,
             "api_key_label": "dashboard-test",
             "source": "dashboard",
+            "tenant_code": "1",
             "filename": file.filename,
             "content_type": file.content_type,
             "file_bytes": len(raw_bytes),

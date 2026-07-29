@@ -136,6 +136,36 @@ def test_extract_cache_hit_logs_avoided_cost_not_zero(auth_client, sample_jpeg_b
     assert second_row["cost_usd"] > 0
 
 
+def test_extract_skips_auth_when_api_key_not_required(client, sample_jpeg_bytes):
+    client.app.state.settings.api_key_required = False
+    r = client.post("/v1/extract", files={"file": ("i.jpg", sample_jpeg_bytes, "image/jpeg")})
+    assert r.status_code == 200
+
+    row = get_request(client.app.state.db, r.json()["request_id"])
+    assert row["api_key_id"] is None
+
+
+def test_extract_still_requires_key_by_default(client, sample_jpeg_bytes):
+    r = client.post("/v1/extract", files={"file": ("i.jpg", sample_jpeg_bytes, "image/jpeg")})
+    assert r.status_code == 401
+
+
+def test_extract_tenant_code_header_stored_verbatim(auth_client, sample_jpeg_bytes):
+    r = auth_client.post(
+        "/v1/extract",
+        files={"file": ("i.jpg", sample_jpeg_bytes, "image/jpeg")},
+        headers={"tenant_code": "acme"},
+    )
+    row = get_request(auth_client.app.state.db, r.json()["request_id"])
+    assert row["tenant_code"] == "acme"
+
+
+def test_extract_tenant_code_defaults_to_1_when_absent(auth_client, sample_jpeg_bytes):
+    r = auth_client.post("/v1/extract", files={"file": ("i.jpg", sample_jpeg_bytes, "image/jpeg")})
+    row = get_request(auth_client.app.state.db, r.json()["request_id"])
+    assert row["tenant_code"] == "1"
+
+
 def test_extract_missing_mock_fixture_returns_unusable_not_500(auth_client, sample_jpeg_bytes):
     r = auth_client.post(
         "/v1/extract",

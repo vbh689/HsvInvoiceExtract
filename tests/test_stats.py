@@ -18,13 +18,17 @@ from app.stats import (
     overview_tiles,
     pick_bucket,
     price_basis_breakdown,
+    recent_requests,
     requests_by_key,
     requests_by_key_stats,
     requests_by_model,
+    requests_by_tenant,
+    requests_by_tenant_stats,
     requests_over_time,
     resolve_period,
     statistics_tiles,
     status_breakdown,
+    tenant_stats,
 )
 
 TZ = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -61,6 +65,7 @@ def _row(**overrides) -> dict:
         "api_key_id": "key-1",
         "api_key_label": "prod",
         "source": "api",
+        "tenant_code": "1",
         "filename": "invoice.jpg",
         "content_type": "image/jpeg",
         "file_bytes": 1234,
@@ -521,6 +526,64 @@ def test_cache_stats_totals_and_bounds(db):
 def test_cache_stats_empty(db):
     result = cache_stats(db)
     assert result == {"total_entries": 0, "oldest_entry_at": None, "newest_entry_at": None}
+
+
+# ---- tenants ----
+
+
+def test_requests_by_tenant(db):
+    insert_request(db, _row(request_id="r1", tenant_code="acme"))
+    insert_request(db, _row(request_id="r2", tenant_code="acme"))
+    insert_request(db, _row(request_id="r3", tenant_code="beta"))
+
+    rows = requests_by_tenant(db, None, None)
+    counts = {row["tenant_code"]: row["count"] for row in rows}
+    assert counts == {"acme": 2, "beta": 1}
+
+
+def test_tenant_stats_scopes_to_single_tenant(db):
+    insert_request(db, _row(request_id="r1", tenant_code="acme", tokens_total=100, cost_usd=0.01))
+    insert_request(db, _row(request_id="r2", tenant_code="acme", tokens_total=200, cost_usd=0.02))
+    insert_request(db, _row(request_id="r3", tenant_code="beta", tokens_total=999, cost_usd=9.0))
+
+    stats = tenant_stats(db, "acme", None, None)
+    assert stats["total_requests"] == 2
+    assert stats["tokens_total"] == 300
+    assert stats["total_cost_usd"] == pytest.approx(0.03)
+
+
+def test_requests_by_tenant_stats_computes_per_tenant_averages_and_cache_rate(db):
+    insert_request(
+        db,
+        _row(
+            request_id="r1",
+            tenant_code="acme",
+            confidence=0.8,
+            cache_hit=0,
+            cost_usd=0.02,
+            latency_ms=100.0,
+        ),
+    )
+    insert_request(
+        db, _row(request_id="r2", tenant_code="acme", confidence=1.0, cache_hit=1, cost_usd=0.5)
+    )
+
+    rows = requests_by_tenant_stats(db, None, None)
+    row = next(r for r in rows if r["tenant_code"] == "acme")
+    assert row["count"] == 2
+    assert row["avg_confidence"] == pytest.approx(0.9)
+    assert row["total_cost_usd"] == pytest.approx(0.02)
+    assert row["avg_latency_ms"] == pytest.approx(100.0)
+    assert row["cache_hit_rate"] == pytest.approx(0.5)
+
+
+def test_recent_requests_filters_by_tenant_code_independently_of_api_key(db):
+    insert_request(db, _row(request_id="r1", api_key_id="key-a", tenant_code="acme"))
+    insert_request(db, _row(request_id="r2", api_key_id="key-a", tenant_code="beta"))
+    insert_request(db, _row(request_id="r3", api_key_id="key-b", tenant_code="acme"))
+
+    rows = recent_requests(db, None, None, tenant_code="acme")
+    assert {row["request_id"] for row in rows} == {"r1", "r3"}
 
 
 def test_api_key_summary_active_vs_revoked(db):
