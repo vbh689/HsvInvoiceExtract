@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ key["label"] }} — HSV Invoice Extraction{% endblock %}
+{% block page_heading %}API key: {{ key["label"] }}{% endblock %}
+{% block content %}
+
+<div class="result-summary-card">
+    <span class="summary-item">prefix <strong>{{ key["key_prefix"] }}…</strong></span>
+    <span class="summary-item">created <strong>{{ key["created_at"] }}</strong></span>
+    <span class="summary-item">last used <strong>{{ key["last_used_at"] or "never" }}</strong></span>
+    {% if key["revoked_at"] %}
+    <span class="badge revoked">revoked {{ key["revoked_at"] }}</span>
+    {% else %}
+    <span class="badge active">active</span>
+    {% endif %}
+</div>
+
+{% include "filter_bar.html" %}
+
+{% set vnd_rate = request.app.state.settings.usd_to_vnd_rate %}
+<div class="tiles-grid">
+    <div class="tile-card"><div class="tile-value">{{ stats.total_requests }}</div><div class="tile-label">Requests</div></div>
+    <div class="tile-card"><div class="tile-value">{{ stats.status_counts.usable }}</div><div class="tile-label">Usable</div></div>
+    <div class="tile-card"><div class="tile-value">{{ stats.status_counts.needs_human_review }}</div><div class="tile-label">Needs review</div></div>
+    <div class="tile-card"><div class="tile-value">{{ stats.status_counts.unusable }}</div><div class="tile-label">Unusable</div></div>
+    <div class="tile-card"><div class="tile-value">{{ "%.1f"|format(stats.avg_confidence * 100) }}%</div><div class="tile-label">Avg confidence</div></div>
+    <div class="tile-card"><div class="tile-value">{{ stats.tokens_total }}</div><div class="tile-label">Total tokens</div></div>
+    <div class="tile-card"><div class="tile-value">${{ "%.4f"|format(stats.total_cost_usd) }}</div><div class="tile-sub">₫{{ "{:,.0f}".format(stats.total_cost_usd * vnd_rate) }}</div><div class="tile-label">Total cost USD</div></div>
+    <div class="tile-card"><div class="tile-value">{{ "%.0f"|format(stats.avg_latency_ms) }} ms</div><div class="tile-label">Avg latency</div></div>
+    <div class="tile-card"><div class="tile-value">{{ "%.1f"|format(stats.cache_hit_rate * 100) }}%</div><div class="tile-label">Cache hit rate</div></div>
+</div>
+
+<div class="section-header"><h2>Recent requests for this key</h2></div>
+<div class="table-card">
+    <table>
+        <thead><tr><th>Time</th><th>Status</th><th>Confidence</th><th>Lines</th><th>Cost</th><th></th></tr></thead>
+        <tbody>
+        {% for row in recent %}
+            <tr>
+                <td>{{ row["created_at"] }}</td>
+                <td><span class="badge status-{{ row['status'] }}">{{ row["status"] }}</span></td>
+                <td>{{ "%.0f"|format(row["confidence"] * 100) }}%</td>
+                <td>{{ row["line_count"] }}</td>
+                <td>{% if row["cache_hit"] %}cached{% else %}${{ "%.4f"|format(row["cost_usd"]) }} (₫{{ "{:,.0f}".format(row["cost_usd"] * vnd_rate) }}){% endif %}</td>
+                <td><a href="/dashboard/logs/{{ row['request_id'] }}">view</a></td>
+            </tr>
+        {% else %}
+            <tr><td colspan="6">No requests in this period.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -1,0 +1,39 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hsv-invoice-extract-lite:latest
+    container_name: hsv-invoice-extract-lite
+
+    # Server-side .env, managed manually by an operator, outside git.
+    # Jenkins never creates, edits, or reads this file.
+    env_file:
+      - .env
+
+    ports:
+      - "${HOST_PORT:-8000}:8000"
+
+    # Bind mount, not a named volume, so the operator can inspect/back up
+    # the single SQLite file (API keys, audit log, cache -- see
+    # docs/OPERATIONS.md) directly on the host.
+    # Before first run:
+    #   mkdir -p data && chown -R 1000:1000 data
+    # (1000:1000 is the container's non-root "app" user.)
+    volumes:
+      - ./data:/app/data
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    restart: unless-stopped
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Extract Test — HSV Invoice Extraction{% endblock %}
+{% block page_heading %}Extract Test{% endblock %}
+{% block content %}
+
+{% if error %}
+<div class="error-banner">{{ error }}</div>
+{% endif %}
+
+<form method="post" action="/dashboard/extract" enctype="multipart/form-data">
+    {% if mock_mode %}
+    <div class="form-row">
+        <label class="form-label" for="fixture_name">Mock fixture</label>
+        <select name="fixture_name" id="fixture_name" class="form-select">
+            {% for name in fixture_names %}
+            <option value="{{ name }}">{{ name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    {% endif %}
+    <div class="drop-zone" onclick="document.getElementById('file').click()">
+        <div class="drop-text" id="drop-text">Click to choose a file</div>
+        <div class="drop-hint">JPEG, PNG, WEBP, HEIC, or PDF</div>
+        <input type="file" id="file" name="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Run extraction</button>
+</form>
+
+<div class="result-section" id="client-preview" style="display:none">
+    <div class="section-header"><h2>Selected file</h2></div>
+    <p class="hint" id="client-preview-pdf-hint" style="display:none"></p>
+    <img class="preview" id="client-preview-img" style="display:none">
+</div>
+
+{% if uploaded_data_url %}
+<div class="result-section">
+    <div class="section-header"><h2>Uploaded file</h2></div>
+    {% if uploaded_file_name.lower().endswith('.pdf') %}
+    <p class="hint">{{ uploaded_file_name }} (PDF preview not rendered here)</p>
+    {% else %}
+    <img class="preview" src="{{ uploaded_data_url }}" alt="{{ uploaded_file_name }}">
+    {% endif %}
+</div>
+{% endif %}
+
+{% if result %}
+<div class="result-section">
+    <div class="result-summary-card">
+        <span class="badge status-{{ result.status }}">{{ result.status }}</span>
+        <span class="summary-item">confidence <strong>{{ "%.0f"|format(result.confidence * 100) }}%</strong></span>
+        <span class="summary-item">{{ result.line_items|length }} line items</span>
+        <span class="summary-item">{{ result.usage.attempts }} attempt(s)</span>
+        <span class="summary-item">${{ "%.6f"|format(result.usage.cost_usd) }} (₫{{ "{:,}".format(result.usage.cost_vnd) }})</span>
+    </div>
+
+    <div class="section-header"><h2>Findings</h2></div>
+    {% if result.findings %}
+    <ul class="findings-list">
+        {% for finding in result.findings %}
+        <li><span class="badge severity-{{ finding.severity }}">{{ finding.severity }}</span> <strong>{{ finding.code }}</strong> — {{ finding.message }}</li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="hint">No findings.</p>
+    {% endif %}
+
+    <div class="section-header"><h2>Line items</h2></div>
+    <div class="table-card">
+        <table>
+            <thead><tr><th>#</th><th>Product</th><th>Qty</th><th>Unit price</th><th>Line total (pre-tax)</th><th>Line total (post-tax)</th></tr></thead>
+            <tbody>
+            {% for item in result.line_items %}
+                <tr>
+                    <td>{{ item.line_no }}</td>
+                    <td>{{ item.product_name or "—" }}</td>
+                    <td>{{ item.quantity }}</td>
+                    <td>{{ item.unit_price_as_printed }}</td>
+                    <td>{{ item.line_total_pre_tax }}</td>
+                    <td>{{ item.line_total_post_tax }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="6">No line items.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <details>
+        <summary>Raw JSON response</summary>
+        <pre>{{ raw_json }}</pre>
+    </details>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('file').addEventListener('change', function () {
+    const file = this.files[0];
+    const dropText = document.getElementById('drop-text');
+    const previewSection = document.getElementById('client-preview');
+    const previewImg = document.getElementById('client-preview-img');
+    const pdfHint = document.getElementById('client-preview-pdf-hint');
+
+    if (!file) {
+        dropText.textContent = 'Click to choose a file';
+        previewSection.style.display = 'none';
+        return;
+    }
+
+    dropText.textContent = file.name;
+    previewSection.style.display = '';
+
+    if (file.type === 'application/pdf') {
+        previewImg.style.display = 'none';
+        pdfHint.textContent = file.name + ' (PDF preview not rendered here)';
+        pdfHint.style.display = '';
+    } else {
+        pdfHint.style.display = 'none';
+        previewImg.src = URL.createObjectURL(file);
+        previewImg.alt = file.name;
+        previewImg.style.display = '';
+    }
+});
+</script>
+{% endblock %}

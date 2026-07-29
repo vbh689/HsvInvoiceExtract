@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Statistics — HSV Invoice Extraction{% endblock %}
+{% block page_heading %}Statistics{% endblock %}
+{% block content %}
+
+{% include "filter_bar.html" %}
+
+{% set vnd_rate = request.app.state.settings.usd_to_vnd_rate %}
+<div class="tiles-grid">
+    <div class="tile-card"><div class="tile-value">{{ tiles.error_count }}</div><div class="tile-label">Errors ({{ "%.1f"|format(tiles.error_rate * 100) }}%)</div></div>
+    <div class="tile-card"><div class="tile-value">{{ tiles.distinct_model_count }}</div><div class="tile-label">Distinct models</div></div>
+    <div class="tile-card"><div class="tile-value">{{ "%.0f"|format(latency.p50) if latency.p50 is not none else "—" }} ms</div><div class="tile-label">Latency p50</div></div>
+    <div class="tile-card"><div class="tile-value">{{ "%.0f"|format(latency.p95) if latency.p95 is not none else "—" }} ms</div><div class="tile-label">Latency p95</div></div>
+    <div class="tile-card"><div class="tile-value">{{ "%.0f"|format(latency.p99) if latency.p99 is not none else "—" }} ms</div><div class="tile-label">Latency p99</div></div>
+    <div class="tile-card"><div class="tile-value">{{ cache.total_entries }}</div><div class="tile-label">Cache entries</div></div>
+    <div class="tile-card"><div class="tile-value">{{ keys_summary.active_count }}</div><div class="tile-label">Active keys</div></div>
+    <div class="tile-card"><div class="tile-value">{{ keys_summary.revoked_count }}</div><div class="tile-label">Revoked keys</div></div>
+</div>
+
+<form method="post" action="/dashboard/cache/purge" onsubmit="return confirm('Purge all {{ cache.total_entries }} cached extraction results? This cannot be undone.');">
+    <button type="submit" class="btn btn-sm btn-ghost danger">Purge cache ({{ cache.total_entries }} entries)</button>
+</form>
+
+<div class="section-header"><h2>Charts</h2></div>
+<div class="charts-grid">
+    <div class="chart-card"><canvas id="chart-confidence"></canvas></div>
+    <div class="chart-card"><canvas id="chart-errors"></canvas></div>
+    <div class="chart-card chart-card-sm"><canvas id="chart-models"></canvas></div>
+    <div class="chart-card chart-card-sm"><canvas id="chart-price-basis"></canvas></div>
+    <div class="chart-card"><canvas id="chart-cache-growth"></canvas></div>
+</div>
+
+<div class="section-header"><h2>Requests by model</h2></div>
+<div class="table-card">
+    <table>
+        <thead><tr><th>Model</th><th>Requests</th><th>Avg confidence</th><th>Cost</th><th>Avg latency</th></tr></thead>
+        <tbody>
+        {% for row in by_model %}
+            <tr>
+                <td>{{ row.model or "unknown" }}</td>
+                <td>{{ row.count }}</td>
+                <td>{{ "%.1f"|format(row.avg_confidence * 100) }}%</td>
+                <td>${{ "%.4f"|format(row.total_cost_usd) }} (₫{{ "{:,.0f}".format(row.total_cost_usd * vnd_rate) }})</td>
+                <td>{{ "%.0f"|format(row.avg_latency_ms) }} ms</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="5">No requests in this period.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="section-header" style="display: flex; align-items: center; justify-content: space-between;">
+    <h2>Requests by API key</h2>
+    <a class="btn btn-sm btn-ghost" href="/dashboard/statistics/export.csv?{{ request.url.query }}">Export CSV</a>
+</div>
+<div class="table-card">
+    <table>
+        <thead><tr><th>Key</th><th>Requests</th><th>Avg confidence</th><th>Cost</th><th>Avg latency</th><th>Cache hit rate</th></tr></thead>
+        <tbody>
+        {% for row in by_key %}
+            <tr>
+                <td>{{ row.api_key_label or "unknown" }}</td>
+                <td>{{ row.count }}</td>
+                <td>{{ "%.1f"|format(row.avg_confidence * 100) }}%</td>
+                <td>${{ "%.4f"|format(row.total_cost_usd) }} (₫{{ "{:,.0f}".format(row.total_cost_usd * vnd_rate) }})</td>
+                <td>{{ "%.0f"|format(row.avg_latency_ms) }} ms</td>
+                <td>{{ "%.1f"|format(row.cache_hit_rate * 100) }}%</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="6">No requests in this period.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const qs = new URLSearchParams(window.location.search);
+fetch("/dashboard/api/statistics-chart-data?" + qs.toString())
+    .then(r => r.json())
+    .then(renderCharts);
+
+function bucketLabels(rows) {
+    return [...new Set(rows.map(r => r.bucket))].sort();
+}
+
+function renderCharts(data) {
+    const confidenceLabels = bucketLabels(data.confidence_over_time);
+    new Chart(document.getElementById("chart-confidence"), {
+        type: "line",
+        data: {
+            labels: confidenceLabels,
+            datasets: [{
+                label: "avg confidence",
+                borderColor: "#6366f1",
+                backgroundColor: "rgba(99,102,241,0.2)",
+                fill: true,
+                data: confidenceLabels.map(l => {
+                    const row = data.confidence_over_time.find(r => r.bucket === l);
+                    return row && row.avg_confidence !== null ? row.avg_confidence * 100 : null;
+                }),
+            }],
+        },
+        options: {responsive: true, plugins: {title: {display: true, text: "Confidence over time", color: "#f8fafc"}, legend: {labels: {color: "#94a3b8"}}}, scales: {x: {ticks: {color: "#94a3b8"}}, y: {ticks: {color: "#94a3b8"}}}},
+    });
+
+    const errorLabels = bucketLabels(data.errors_over_time);
+    new Chart(document.getElementById("chart-errors"), {
+        type: "line",
+        data: {
+            labels: errorLabels,
+            datasets: [{
+                label: "error rate",
+                borderColor: "#f87171",
+                backgroundColor: "rgba(248,113,113,0.2)",
+                fill: true,
+                data: errorLabels.map(l => {
+                    const row = data.errors_over_time.find(r => r.bucket === l);
+                    return row && row.total ? (row.error_count / row.total) * 100 : 0;
+                }),
+            }],
+        },
+        options: {responsive: true, plugins: {title: {display: true, text: "Error rate over time", color: "#f8fafc"}, legend: {labels: {color: "#94a3b8"}}}, scales: {x: {ticks: {color: "#94a3b8"}}, y: {ticks: {color: "#94a3b8"}}}},
+    });
+
+    new Chart(document.getElementById("chart-models"), {
+        type: "doughnut",
+        data: {
+            labels: data.requests_by_model.map(r => r.model || "unknown"),
+            datasets: [{data: data.requests_by_model.map(r => r.count), backgroundColor: ["#6366f1", "#8b5cf6", "#34d399", "#fbbf24", "#f87171", "#818cf8", "#94a3b8"]}],
+        },
+        options: {responsive: true, plugins: {title: {display: true, text: "Requests by model", color: "#f8fafc"}, legend: {labels: {color: "#94a3b8"}}}},
+    });
+
+    const basisColors = {pre_tax: "#34d399", post_tax: "#6366f1", unknown: "#94a3b8"};
+    new Chart(document.getElementById("chart-price-basis"), {
+        type: "doughnut",
+        data: {
+            labels: Object.keys(data.price_basis_breakdown),
+            datasets: [{data: Object.values(data.price_basis_breakdown), backgroundColor: Object.keys(data.price_basis_breakdown).map(k => basisColors[k] || "#94a3b8")}],
+        },
+        options: {responsive: true, plugins: {title: {display: true, text: "Price basis breakdown", color: "#f8fafc"}, legend: {labels: {color: "#94a3b8"}}}},
+    });
+
+    const cacheLabels = bucketLabels(data.cache_growth_over_time);
+    new Chart(document.getElementById("chart-cache-growth"), {
+        type: "line",
+        data: {
+            labels: cacheLabels,
+            datasets: [{
+                label: "cumulative cache entries",
+                borderColor: "#8b5cf6",
+                backgroundColor: "rgba(139,92,246,0.2)",
+                fill: true,
+                data: cacheLabels.map(l => (data.cache_growth_over_time.find(r => r.bucket === l) || {}).cumulative_total || 0),
+            }],
+        },
+        options: {responsive: true, plugins: {title: {display: true, text: "Cache growth over time", color: "#f8fafc"}, legend: {labels: {color: "#94a3b8"}}}, scales: {x: {ticks: {color: "#94a3b8"}}, y: {ticks: {color: "#94a3b8"}}}},
+    });
+}
+</script>
+{% endblock %}

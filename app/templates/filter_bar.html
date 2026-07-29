@@ -1,0 +1,37 @@
+{% set periods = [
+    ("today", "Today"), ("yesterday", "Yesterday"),
+    ("3d", "3d"), ("7d", "7d"), ("14d", "14d"), ("30d", "30d"),
+    ("this_month", "This month"), ("last_month", "Last month"),
+    ("3mo", "3mo"), ("6mo", "6mo"), ("all", "All time"),
+] %}
+<div class="filter-card">
+    <form class="filter-form" method="get">
+        {% for key, value in (preserve_params or {}).items() %}
+        <input type="hidden" name="{{ key }}" value="{{ value }}">
+        {% endfor %}
+        <div class="filter-header-row">
+            <span class="filter-label">Period</span>
+            <div class="quick-buttons">
+                {% for key, label in periods %}
+                <button type="submit" name="period" value="{{ key }}"
+                        class="quick-btn {% if filter_meta.period == key %}active{% endif %}">{{ label }}</button>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="datetime-picker-row">
+            <div class="datetime-fields">
+                <div class="field-item">
+                    <span class="field-label">Start</span>
+                    <input type="datetime-local" name="start" class="form-input-datetime" value="{{ filter_meta.start }}">
+                </div>
+                <div class="field-item">
+                    <span class="field-label">End</span>
+                    <input type="datetime-local" name="end" class="form-input-datetime" value="{{ filter_meta.end }}">
+                </div>
+            </div>
+            <div class="filter-actions">
+                <button type="submit" name="period" value="custom" class="btn btn-sm btn-primary">Apply custom range</button>
+            </div>
+        </div>
+    </form>
+</div>

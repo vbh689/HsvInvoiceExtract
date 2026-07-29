@@ -1,0 +1,38 @@
+{
+  "supplier_name": "Cong ty TNHH Vat Tu Thanh Cong",
+  "supplier_tax_code": "0301234567",
+  "invoice_number": "HD-000001",
+  "invoice_date": "01/07/2026",
+  "currency": "VND",
+  "printed_subtotal": "1.500.000",
+  "printed_tax_amount": "150.000",
+  "printed_tax_rate": "10%",
+  "printed_grand_total": "1.650.000",
+  "printed_discount": null,
+  "stated_price_basis": "pre_tax",
+  "line_items": [
+    {
+      "line_no": "1",
+      "product_code": "SP001",
+      "product_name": "Giay A4",
+      "unit": "thung",
+      "quantity": "5",
+      "unit_price": "200.000",
+      "line_total": "1.000.000",
+      "discount": null,
+      "tax_rate": "10%"
+    },
+    {
+      "line_no": "2",
+      "product_code": "SP002",
+      "product_name": "But bi xanh",
+      "unit": "hop",
+      "quantity": "10",
+      "unit_price": "50.000",
+      "line_total": "500.000",
+      "discount": null,
+      "tax_rate": "10%"
+    }
+  ],
+  "model_notes": null
+}

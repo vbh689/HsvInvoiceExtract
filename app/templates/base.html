@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}HSV Invoice Extraction{% endblock %}</title>
+    <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+    {% if request.session.get("authenticated") %}
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="brand-icon">IE</div>
+                <div>
+                    <div class="brand-title">Invoice Extraction</div>
+                    <div class="brand-sub">Lite</div>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">Overview</a>
+                <a href="/dashboard/statistics" class="nav-link {% if request.url.path == '/dashboard/statistics' %}active{% endif %}">Statistics</a>
+                <a href="/dashboard/extract" class="nav-link {% if request.url.path == '/dashboard/extract' %}active{% endif %}">Extract Test</a>
+                <a href="/dashboard/logs" class="nav-link {% if request.url.path.startswith('/dashboard/logs') %}active{% endif %}">Audit Logs</a>
+                <a href="/dashboard/keys" class="nav-link {% if request.url.path.startswith('/dashboard/keys') %}active{% endif %}">API Keys</a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="footer-meta">
+                    <div>{{ request.app.state.settings.llm_model }}</div>
+                    <div>in ${{ request.app.state.settings.llm_price_per_1m_input }}/1M · out ${{ request.app.state.settings.llm_price_per_1m_output }}/1M</div>
+                    <div>provider key: {{ "set" if request.app.state.settings.llm_api_key else "not set" }}</div>
+                </div>
+                <form action="/dashboard/logout" method="post">
+                    <button type="submit" class="link-button danger">Log out</button>
+                </form>
+            </div>
+        </aside>
+
+        <div class="main-wrapper">
+            <header class="top-header">
+                <div class="page-title">{% block page_heading %}Dashboard{% endblock %}</div>
+                <div class="header-badges">
+                    {% if mock_mode %}
+                    <span class="mode-badge">MOCK MODE</span>
+                    {% else %}
+                    <span class="mode-badge live">LIVE MODE</span>
+                    {% endif %}
+                </div>
+            </header>
+            <main class="content-body">
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+    <script src="/static/chart.min.js"></script>
+    {% block scripts %}{% endblock %}
+    {% else %}
+    <div class="login-container">
+        {% block login_content %}{% endblock %}
+    </div>
+    {% endif %}
+</body>
+</html>

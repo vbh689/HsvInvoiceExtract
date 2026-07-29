@@ -1,0 +1,38 @@
+{
+  "supplier_name": "Cong ty TNHH ACME",
+  "supplier_tax_code": "0312345678",
+  "invoice_number": "HD-000123",
+  "invoice_date": "15/03/2026",
+  "currency": "VND",
+  "printed_subtotal": "350.000",
+  "printed_tax_amount": "35.000",
+  "printed_tax_rate": "10%",
+  "printed_grand_total": "385.000",
+  "printed_discount": null,
+  "stated_price_basis": "pre_tax",
+  "line_items": [
+    {
+      "line_no": "1",
+      "product_code": "SKU-001",
+      "product_name": "Bulong M8",
+      "unit": "cai",
+      "quantity": "2",
+      "unit_price": "100.000",
+      "line_total": "200.000",
+      "discount": null,
+      "tax_rate": "10%"
+    },
+    {
+      "line_no": "2",
+      "product_code": "SKU-002",
+      "product_name": "Oc vit M8",
+      "unit": "cai",
+      "quantity": "3",
+      "unit_price": "50.000",
+      "line_total": "150.000",
+      "discount": null,
+      "tax_rate": "10%"
+    }
+  ],
+  "model_notes": null
+}

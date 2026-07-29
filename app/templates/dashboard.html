@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — HSV Invoice Extraction{% endblock %}
+{% block page_heading %}Overview{% endblock %}
+{% block content %}
+
+{% include "filter_bar.html" %}
+
+{% set vnd_rate = request.app.state.settings.usd_to_vnd_rate %}
+<div class="tiles-grid">
+    <div class="tile-card"><div class="tile-value">{{ tiles.total_requests }}</div><div class="tile-label">Requests</div></div>
+    <div class="tile-card"><div class="tile-value">{{ tiles.usable_count }}</div><div class="tile-label">Usable</div></div>
+    <div class="tile-card"><div class="tile-value">{{ tiles.needs_human_review_count }}</div><div class="tile-label">Needs review</div></div>
+    <div class="tile-card"><div class="tile-value">{{ tiles.unusable_count }}</div><div class="tile-label">Unusable</div></div>
+    <div class="tile-card"><div class="tile-value">{{ "%.1f"|format(tiles.avg_confidence * 100) }}%</div><div class="tile-label">Avg confidence</div></div>
+    <div class="tile-card"><div class="tile-value">{{ "%.1f"|format(tiles.cache_hit_rate * 100) }}%</div><div class="tile-label">Cache hit rate</div></div>
+    <div class="tile-card"><div class="tile-value">{{ tiles.tokens_total }}</div><div class="tile-label">Total tokens</div></div>
+    <div class="tile-card"><div class="tile-value">${{ "%.4f"|format(tiles.total_cost_usd) }}</div><div class="tile-sub">₫{{ "{:,.0f}".format(tiles.total_cost_usd * vnd_rate) }}</div><div class="tile-label">Total cost USD{% if tiles.has_estimated_cost %} *{% endif %}</div></div>
+    <div class="tile-card"><div class="tile-value">${{ "%.4f"|format(tiles.cost_saved_usd) }}</div><div class="tile-sub">₫{{ "{:,.0f}".format(tiles.cost_saved_usd * vnd_rate) }}</div><div class="tile-label">Cost saved by cache</div></div>
+    <div class="tile-card"><div class="tile-value">{{ "%.0f"|format(tiles.avg_latency_ms) }} ms</div><div class="tile-label">Avg latency</div></div>
+    <div class="tile-card"><div class="tile-value">{{ "%.1f"|format(tiles.retry_rate * 100) }}%</div><div class="tile-label">Retry rate</div></div>
+</div>
+{% if tiles.has_estimated_cost %}
+<p class="hint">* includes cost estimated from configured per-token rates, not all provider-reported.</p>
+{% endif %}
+
+<div class="section-header"><h2>Charts</h2></div>
+<div class="charts-grid">
+    <div class="chart-card"><canvas id="chart-requests"></canvas></div>
+    <div class="chart-card"><canvas id="chart-tokens"></canvas></div>
+    <div class="chart-card"><canvas id="chart-cost"></canvas></div>
+    <div class="chart-card chart-card-sm"><canvas id="chart-status"></canvas></div>
+    <div class="chart-card"><canvas id="chart-findings"></canvas></div>
+    <div class="chart-card"><canvas id="chart-keys"></canvas></div>
+</div>
+
+<div class="section-header"><h2>Recent requests</h2></div>
+<div class="table-card">
+    <table>
+        <thead><tr><th>Time</th><th>Key</th><th>Status</th><th>Confidence</th><th>Lines</th><th>Cost</th><th></th></tr></thead>
+        <tbody>
+        {% for row in recent %}
+            <tr>
+                <td>{{ row["created_at"] }}</td>
+                <td>{{ row["api_key_label"] or "—" }}</td>
+                <td><span class="badge status-{{ row['status'] }}">{{ row["status"] }}</span></td>
+                <td>{{ "%.0f"|format(row["confidence"] * 100) }}%</td>
+                <td>{{ row["line_count"] }}</td>
+                <td>{% if row["cache_hit"] %}cached{% else %}${{ "%.4f"|format(row["cost_usd"]) }} (₫{{ "{:,.0f}".format(row["cost_usd"] * vnd_rate) }}){% endif %}</td>
+                <td><a href="/dashboard/logs/{{ row['request_id'] }}">view</a></td>
+            </tr>
+        {% else %}
+            <tr><td colspan="7">No requests in this period.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const qs = new URLSearchParams(window.location.search);
+fetch("/dashboard/api/chart-data?" + qs.toString())
+    .then(r => r.json())
+    .then(renderCharts);
+
+function bucketLabels(rows) {
+    return [...new Set(rows.map(r => r.bucket))].sort();
+}
+
+function renderCharts(data) {
+    const labels = bucketLabels(data.requests_over_time.length ? data.requests_over_time : data.cost_over_time);
+    const statuses = ["usable", "needs_human_review", "unusable"];
+    const statusColors = {usable: "#34d399", needs_human_review: "#fbbf24", unusable: "#f87171"};
+
+    new Chart(document.getElementById("chart-requests"), {
+        type: "bar",
+        data: {
+            labels,
+            datasets: statuses.map(status => ({
+                label: status,
+                backgroundColor: statusColors[status],
+                data: labels.map(l => {
+                    const row = data.requests_over_time.find(r => r.bucket === l && r.status === status);
+                    return row ? row.count : 0;
+                }),
+            })),
+        },
+        options: {responsive: true, plugins: {title: {display: true, text: "Requests over time", color: "#f8fafc"}, legend: {labels: {color: "#94a3b8"}}}, scales: {x: {stacked: true, ticks: {color: "#94a3b8"}}, y: {stacked: true, ticks: {color: "#94a3b8"}}}},
+    });
+
+    const tokenLabels = bucketLabels(data.tokens_over_time);
+    new Chart(document.getElementById("chart-tokens"), {
+        type: "bar",
+        data: {
+            labels: tokenLabels,
+            datasets: [
+                {label: "input", backgroundColor: "#6366f1", data: tokenLabels.map(l => (data.tokens_over_time.find(r => r.bucket === l) || {}).tokens_in || 0)},
+                {label: "output", backgroundColor: "#8b5cf6", data: tokenLabels.map(l => (data.tokens_over_time.find(r => r.bucket === l) || {}).tokens_out || 0)},
+            ],
+        },
+        options: {responsive: true, plugins: {title: {display: true, text: "Tokens over time", color: "#f8fafc"}, legend: {labels: {color: "#94a3b8"}}}, scales: {x: {ticks: {color: "#94a3b8"}}, y: {ticks: {color: "#94a3b8"}}}},
+    });
+
+    const costLabels = bucketLabels(data.cost_over_time);
+    new Chart(document.getElementById("chart-cost"), {
+        type: "line",
+        data: {
+            labels: costLabels,
+            datasets: [{label: "cost (USD)", borderColor: "#6366f1", backgroundColor: "rgba(99,102,241,0.2)", fill: true, data: costLabels.map(l => (data.cost_over_time.find(r => r.bucket === l) || {}).cost_usd || 0)}],
+        },
+        options: {responsive: true, plugins: {title: {display: true, text: "Cost over time", color: "#f8fafc"}, legend: {labels: {color: "#94a3b8"}}}, scales: {x: {ticks: {color: "#94a3b8"}}, y: {ticks: {color: "#94a3b8"}}}},
+    });
+
+    new Chart(document.getElementById("chart-status"), {
+        type: "doughnut",
+        data: {
+            labels: Object.keys(data.status_breakdown),
+            datasets: [{data: Object.values(data.status_breakdown), backgroundColor: Object.keys(data.status_breakdown).map(s => statusColors[s] || "#94a3b8")}],
+        },
+        options: {responsive: true, plugins: {title: {display: true, text: "Status breakdown", color: "#f8fafc"}, legend: {labels: {color: "#94a3b8"}}}},
+    });
+
+    const sevColors = {error: "#f87171", warning: "#fbbf24", info: "#818cf8"};
+    new Chart(document.getElementById("chart-findings"), {
+        type: "bar",
+        data: {
+            labels: data.findings_by_code.map(r => r.code),
+            datasets: [{label: "count", data: data.findings_by_code.map(r => r.count), backgroundColor: data.findings_by_code.map(r => sevColors[r.severity] || "#94a3b8")}],
+        },
+        options: {indexAxis: "y", responsive: true, plugins: {title: {display: true, text: "Findings by code", color: "#f8fafc"}, legend: {display: false}}, scales: {x: {ticks: {color: "#94a3b8"}}, y: {ticks: {color: "#94a3b8"}}}},
+    });
+
+    new Chart(document.getElementById("chart-keys"), {
+        type: "bar",
+        data: {
+            labels: data.requests_by_key.map(r => r.api_key_label || "unknown"),
+            datasets: [{label: "requests", data: data.requests_by_key.map(r => r.count), backgroundColor: "#6366f1"}],
+        },
+        options: {indexAxis: "y", responsive: true, plugins: {title: {display: true, text: "Requests by API key", color: "#f8fafc"}, legend: {display: false}}, scales: {x: {ticks: {color: "#94a3b8"}}, y: {ticks: {color: "#94a3b8"}}}},
+    });
+}
+</script>
+{% endblock %}

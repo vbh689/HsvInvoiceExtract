@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Request {{ entry["request_id"] }} — HSV Invoice Extraction{% endblock %}
+{% block page_heading %}Request detail{% endblock %}
+{% block content %}
+
+<div class="result-summary-card">
+    <span class="summary-item"><strong>{{ entry["request_id"] }}</strong></span>
+    <span class="summary-item">{{ entry["created_at"] }}</span>
+    <span class="badge status-{{ entry['status'] }}">{{ entry["status"] }}</span>
+    <span class="summary-item">confidence <strong>{{ "%.0f"|format(entry["confidence"] * 100) }}%</strong></span>
+    <span class="summary-item">source <strong>{{ entry["source"] }}</strong></span>
+    <span class="summary-item">key <strong>{{ entry["api_key_label"] or "—" }}</strong></span>
+</div>
+
+{% if entry["error"] %}
+<div class="error-banner">{{ entry["error"] }}</div>
+{% endif %}
+
+<div class="section-header"><h2>Document</h2></div>
+<div class="table-card">
+    <table>
+        <tbody>
+        {% for label, value in [
+            ("Supplier", response.document.supplier_name),
+            ("Tax code", response.document.supplier_tax_code),
+            ("Invoice number", response.document.invoice_number),
+            ("Invoice date", response.document.invoice_date),
+            ("Currency", response.document.currency),
+            ("Subtotal (printed / calculated)", (response.document.subtotal_printed, response.document.subtotal_calculated)),
+            ("Tax amount (printed / calculated)", (response.document.tax_amount_printed, response.document.tax_amount_calculated)),
+            ("Tax rate", response.document.tax_rate),
+            ("Grand total (printed / calculated)", (response.document.grand_total_printed, response.document.grand_total_calculated)),
+            ("Discount", response.document.discount),
+            ("Price basis", response.price_basis.basis ~ " (" ~ response.price_basis.resolved_by ~ ")"),
+        ] %}
+            <tr><th>{{ label }}</th><td>{{ value }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="section-header"><h2>Line items ({{ response.line_items|length }})</h2></div>
+<div class="table-card">
+    <table>
+        <thead><tr><th>#</th><th>Product</th><th>Unit</th><th>Qty</th><th>Unit price (printed)</th><th>Line total (pre-tax)</th><th>Line total (post-tax)</th></tr></thead>
+        <tbody>
+        {% for item in response.line_items %}
+            <tr>
+                <td>{{ item.line_no }}</td>
+                <td>{{ item.product_name or "—" }}</td>
+                <td>{{ item.unit or "—" }}</td>
+                <td>{{ item.quantity }}</td>
+                <td>{{ item.unit_price_as_printed }}</td>
+                <td>{{ item.line_total_pre_tax }}</td>
+                <td>{{ item.line_total_post_tax }}</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="7">No line items.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="section-header"><h2>Findings ({{ response.findings|length }})</h2></div>
+{% if response.findings %}
+<ul class="findings-list">
+    {% for finding in response.findings %}
+    <li><span class="badge severity-{{ finding.severity }}">{{ finding.severity }}</span> <strong>{{ finding.code }}</strong> — {{ finding.message }}{% if finding.line_no %} (line {{ finding.line_no }}){% endif %}</li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="hint">No findings.</p>
+{% endif %}
+
+<div class="section-header"><h2>Usage</h2></div>
+<div class="table-card">
+    <table>
+        <tbody>
+            <tr><th>Model</th><td>{{ response.usage.model }}</td></tr>
+            <tr><th>Attempts</th><td>{{ response.usage.attempts }}</td></tr>
+            <tr><th>Cached</th><td>{{ response.usage.cached }}</td></tr>
+            <tr><th>Latency</th><td>{{ "%.0f"|format(response.usage.latency_ms) }} ms</td></tr>
+            <tr><th>Tokens (in / out / total)</th><td>{{ response.usage.tokens_in }} / {{ response.usage.tokens_out }} / {{ response.usage.tokens_total }}</td></tr>
+            <tr><th>Cost</th><td>${{ "%.6f"|format(response.usage.cost_usd) }} (₫{{ "{:,.0f}".format(response.usage.cost_usd * request.app.state.settings.usd_to_vnd_rate) }}, {{ entry["cost_source"] }})</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<details>
+    <summary>Raw JSON response</summary>
+    <pre>{{ raw_json }}</pre>
+</details>
+
+{% endblock %}

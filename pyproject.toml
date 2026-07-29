@@ -1,0 +1,51 @@
+[project]
+name = "hsv-invoice-extract-lite"
+version = "0.1.0"
+description = "Lite extraction service for Vietnamese purchase invoices (photo/PDF -> structured line items)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "python-multipart>=0.0.12",
+    "openai>=1.54",
+    "pillow>=11.0",
+    "pillow-heif>=0.20",
+    "pypdfium2>=4.30",
+    "python-dotenv>=1.0",
+    "jinja2>=3.1",
+    "itsdangerous>=2.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.7",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection style relies on calling Depends()/File()/
+# Header() etc. as argument defaults -- that's the framework contract, not
+# the mutable-default-argument bug B008 exists to catch.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Header", "fastapi.Query"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

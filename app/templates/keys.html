@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}API Keys — HSV Invoice Extraction{% endblock %}
+{% block page_heading %}API Keys{% endblock %}
+{% block content %}
+
+{% if flashed_key %}
+<div class="flash-key">
+    <strong>New API key created.</strong> This is shown once and cannot be retrieved again — copy it now.
+    <pre>{{ flashed_key }}</pre>
+</div>
+{% endif %}
+
+<div class="filter-card">
+    <form class="filter-form" method="post" action="/dashboard/keys">
+        <div class="form-row">
+            <label class="form-label" for="label">Label</label>
+            <input type="text" id="label" name="label" required placeholder="e.g. warehouse-scanner-1">
+            <button type="submit" class="btn btn-primary">Create key</button>
+        </div>
+    </form>
+</div>
+
+<div class="table-card">
+    <table>
+        <thead><tr><th>Label</th><th>Prefix</th><th>Created</th><th>Last used</th><th>Requests</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+        {% for key in records %}
+            <tr>
+                <td><a href="/dashboard/keys/{{ key['id'] }}">{{ key["label"] }}</a></td>
+                <td>{{ key["key_prefix"] }}…</td>
+                <td>{{ key["created_at"] }}</td>
+                <td>{{ key["last_used_at"] or "never" }}</td>
+                <td>{{ request_counts.get(key["id"], 0) }}</td>
+                <td>
+                    {% if key["revoked_at"] %}
+                    <span class="badge revoked">revoked</span>
+                    {% else %}
+                    <span class="badge active">active</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if not key["revoked_at"] %}
+                    <form method="post" action="/dashboard/keys/{{ key['id'] }}/revoke" onsubmit="return confirm('Revoke this key? This cannot be undone.');">
+                        <button type="submit" class="link-button danger">revoke</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+        {% else %}
+            <tr><td colspan="7">No API keys yet.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

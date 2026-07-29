@@ -1,0 +1,27 @@
+{
+  "supplier_name": "CN Cong ty TNHH Phan Mem FAST tai TP.HCM",
+  "supplier_tax_code": null,
+  "invoice_number": "NM001",
+  "invoice_date": "26/10/2022",
+  "currency": "VND",
+  "printed_subtotal": "150 000 000",
+  "printed_tax_amount": "15 000 000",
+  "printed_tax_rate": null,
+  "printed_grand_total": "165 000 000",
+  "printed_discount": "0",
+  "stated_price_basis": "unknown",
+  "line_items": [
+    {
+      "line_no": "1",
+      "product_code": "1551",
+      "product_name": "Hang hoa 01",
+      "unit": "Cai",
+      "quantity": "1 000,00",
+      "unit_price": "150 000",
+      "line_total": "150 000 000",
+      "discount": null,
+      "tax_rate": null
+    }
+  ],
+  "model_notes": null
+}

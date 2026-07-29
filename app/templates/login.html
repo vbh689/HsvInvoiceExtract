@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Login — HSV Invoice Extraction{% endblock %}
+{% block login_content %}
+<div class="login-card">
+    <div class="brand-icon">IE</div>
+    <h1>Invoice Extraction</h1>
+    <p class="login-subtitle">Operator dashboard</p>
+    {% if error %}
+    <div class="error-banner">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/dashboard/login">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autofocus>
+        <button type="submit" class="btn btn-primary">Sign in</button>
+    </form>
+</div>
+{% endblock %}

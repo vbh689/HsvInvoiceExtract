@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Audit Logs — HSV Invoice Extraction{% endblock %}
+{% block page_heading %}Audit Logs{% endblock %}
+{% block content %}
+
+{% with preserve_params = {"status": status, "limit": limit} %}
+{% include "filter_bar.html" %}
+{% endwith %}
+
+<div class="filter-card">
+    <form class="filter-form" method="get">
+        <input type="hidden" name="period" value="{{ filter_meta.period }}">
+        <input type="hidden" name="start" value="{{ filter_meta.start }}">
+        <input type="hidden" name="end" value="{{ filter_meta.end }}">
+        <div class="status-filter-group">
+            <span class="filter-label">Status</span>
+            <select name="status" class="form-select" onchange="this.form.submit()">
+                <option value="" {% if not status %}selected{% endif %}>All</option>
+                <option value="usable" {% if status == "usable" %}selected{% endif %}>Usable</option>
+                <option value="needs_human_review" {% if status == "needs_human_review" %}selected{% endif %}>Needs review</option>
+                <option value="unusable" {% if status == "unusable" %}selected{% endif %}>Unusable</option>
+            </select>
+        </div>
+    </form>
+</div>
+
+<div class="table-card">
+    <table>
+        <thead><tr><th>Time</th><th>Source</th><th>Key</th><th>Filename</th><th>Status</th><th>Confidence</th><th>Lines</th><th>Cost</th><th></th></tr></thead>
+        <tbody>
+        {% for row in entries %}
+            <tr>
+                <td>{{ row["created_at"] }}</td>
+                <td>{{ row["source"] }}</td>
+                <td>{{ row["api_key_label"] or "—" }}</td>
+                <td>{{ row["filename"] or "—" }}</td>
+                <td><span class="badge status-{{ row['status'] }}">{{ row["status"] }}</span></td>
+                <td>{{ "%.0f"|format(row["confidence"] * 100) }}%</td>
+                <td>{{ row["line_count"] }}</td>
+                <td>{% if row["cache_hit"] %}cached{% else %}${{ "%.4f"|format(row["cost_usd"]) }} (₫{{ "{:,.0f}".format(row["cost_usd"] * request.app.state.settings.usd_to_vnd_rate) }}){% endif %}</td>
+                <td><a href="/dashboard/logs/{{ row['request_id'] }}">view</a></td>
+            </tr>
+        {% else %}
+            <tr><td colspan="9">No requests match this filter.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
