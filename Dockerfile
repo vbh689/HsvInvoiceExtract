@@ -22,6 +22,10 @@ RUN uv sync --frozen --no-install-project --no-dev
 
 COPY app/ ./app/
 COPY prompts/ ./prompts/
+# app/dashboard.py::api_docs reads docs/API.md from disk at runtime to render
+# the dashboard's API page, so it has to ship even though the rest of docs/
+# is just for humans reading the repo.
+COPY docs/API.md ./docs/API.md
 # app/llm.py::DEFAULT_FIXTURE_DIR resolves mock fixtures relative to this tree
 # at runtime (MOCK_MODE + X-Mock-Fixture is a documented runtime feature, not
 # just a pytest fixture dir), so it has to ship even though the rest of tests/

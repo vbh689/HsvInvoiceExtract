@@ -44,6 +44,7 @@ def test_unauthenticated_logs_and_keys_redirect_to_login(dash_client):
         "/dashboard/extract",
         "/dashboard/statistics",
         "/dashboard/tenants",
+        "/dashboard/api-docs",
     ]
     for path in paths:
         r = dash_client.get(path, follow_redirects=False)
@@ -98,6 +99,13 @@ def test_overview_renders(authed_client):
     r = authed_client.get("/dashboard")
     assert r.status_code == 200
     assert "Overview" in r.text or "overview" in r.text.lower()
+
+
+def test_api_docs_page_renders(authed_client):
+    r = authed_client.get("/dashboard/api-docs")
+    assert r.status_code == 200
+    assert "X-API-Key" in r.text
+    assert "<table>" in r.text
 
 
 def test_chart_data_endpoint_shape(authed_client):

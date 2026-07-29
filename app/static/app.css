@@ -258,3 +258,21 @@ details pre { background: var(--bg-app); color: #e2e8f0; padding: 1.1rem; font-f
 .field-item { display: flex; align-items: center; gap: 0.5rem; }
 .field-label { font-size: 0.72rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .filter-actions { display: flex; align-items: center; gap: 0.75rem; }
+
+.markdown-body { max-width: 860px; font-size: 0.9rem; }
+.markdown-body h1 { font-size: 1.6rem; font-weight: 800; margin: 0 0 1rem; }
+.markdown-body h2 { margin: 2rem 0 0.9rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-subtle); }
+.markdown-body h3 { font-size: 1rem; font-weight: 700; margin: 1.5rem 0 0.6rem; }
+.markdown-body h4 { font-size: 0.9rem; font-weight: 700; margin: 1.25rem 0 0.5rem; }
+.markdown-body p { margin: 0 0 1rem; color: var(--text-secondary); }
+.markdown-body ul, .markdown-body ol { margin: 0 0 1rem; padding-left: 1.4rem; color: var(--text-secondary); display: flex; flex-direction: column; gap: 0.35rem; }
+.markdown-body li > ul, .markdown-body li > ol { margin: 0.35rem 0 0; }
+.markdown-body a { color: #818cf8; text-decoration: none; }
+.markdown-body a:hover { text-decoration: underline; }
+.markdown-body strong { color: var(--text-primary); }
+.markdown-body code { font-family: var(--font-mono); font-size: 0.82em; background: rgba(255, 255, 255, 0.08); border-radius: var(--radius-sm); padding: 0.15em 0.4em; }
+.markdown-body pre { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 1rem 1.1rem; overflow-x: auto; margin: 0 0 1.25rem; }
+.markdown-body pre code { background: none; padding: 0; font-size: 0.82rem; line-height: 1.6; color: var(--text-primary); }
+.markdown-body blockquote { border-left: 3px solid var(--border-medium); margin: 0 0 1rem; padding: 0.1rem 1rem; color: var(--text-muted); }
+.markdown-body hr { border: none; border-top: 1px solid var(--border-subtle); margin: 1.75rem 0; }
+.markdown-body table { margin-bottom: 1.25rem; display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }

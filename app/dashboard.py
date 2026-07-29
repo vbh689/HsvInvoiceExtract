@@ -16,6 +16,7 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+import markdown
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -62,6 +63,7 @@ from app.stats import (
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+DOCS_DIR = Path(__file__).parent.parent / "docs"
 
 VALID_STATUSES = {"usable", "needs_human_review", "unusable"}
 
@@ -426,6 +428,23 @@ async def tenant_detail(request: Request, tenant_code: str):
             "stats": stats,
             "recent": recent,
             "filter_meta": meta,
+            "mock_mode": request.app.state.settings.mock_mode,
+        },
+    )
+
+
+# ---- API docs ----
+
+
+@router.get("/api-docs")
+async def api_docs(request: Request):
+    text = (DOCS_DIR / "API.md").read_text(encoding="utf-8")
+    content_html = markdown.markdown(text, extensions=["fenced_code", "tables"])
+    return templates.TemplateResponse(
+        request,
+        "api_docs.html",
+        {
+            "content_html": content_html,
             "mock_mode": request.app.state.settings.mock_mode,
         },
     )
