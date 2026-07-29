@@ -3,7 +3,27 @@
 {% block page_heading %}Tenant: {{ tenant_code }}{% endblock %}
 {% block content %}
 
+{% with preserve_params = {"user": user} %}
 {% include "filter_bar.html" %}
+{% endwith %}
+
+<div class="filter-card">
+    <form class="filter-form" method="get">
+        <input type="hidden" name="period" value="{{ filter_meta.period }}">
+        <input type="hidden" name="start" value="{{ filter_meta.start }}">
+        <input type="hidden" name="end" value="{{ filter_meta.end }}">
+        <div class="status-filter-group">
+            <span class="filter-label">User</span>
+            <select name="user" class="form-select" onchange="this.form.submit()">
+                <option value="" {% if not user %}selected{% endif %}>All</option>
+                {% for opt in user_options %}
+                {% set opt_value = opt.user_name if opt.user_name else no_user_value %}
+                <option value="{{ opt_value }}" {% if user == opt_value %}selected{% endif %}>{{ opt.user_name or "(no user)" }} ({{ opt.count }})</option>
+                {% endfor %}
+            </select>
+        </div>
+    </form>
+</div>
 
 {% set vnd_rate = request.app.state.settings.usd_to_vnd_rate %}
 <div class="tiles-grid">
@@ -18,7 +38,7 @@
     <div class="tile-card"><div class="tile-value">{{ "%.1f"|format(stats.cache_hit_rate * 100) }}%</div><div class="tile-label">Cache hit rate</div></div>
 </div>
 
-<div class="section-header"><h2>Recent requests for this tenant</h2></div>
+<div class="section-header"><h2>Recent requests for this tenant{% if user %} — {{ "(no user)" if user == no_user_value else user }}{% endif %}</h2></div>
 <div class="table-card">
     <table>
         <thead><tr><th>Time</th><th>User</th><th>Status</th><th>Confidence</th><th>Lines</th><th>Cost</th><th></th></tr></thead>

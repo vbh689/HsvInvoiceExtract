@@ -40,6 +40,7 @@ from app.stats import (
     cache_stats,
     confidence_over_time,
     cost_over_time,
+    distinct_user_names,
     errors_over_time,
     findings_by_code,
     key_stats,
@@ -66,6 +67,21 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 DOCS_DIR = Path(__file__).parent.parent / "docs"
 
 VALID_STATUSES = {"usable", "needs_human_review", "unusable"}
+
+# Dropdown value standing in for `user_name IS NULL` (dashboard test-uploads
+# and any API call sent without X-UserName). An empty <option> value already
+# means "no filter", so NULL needs a sentinel of its own.
+NO_USER_VALUE = "__none__"
+
+
+def _user_filter(user: str | None) -> tuple[str | None, bool]:
+    """Maps the dropdown's submitted value to `recent_requests`'
+    `(user_name, no_user)` pair."""
+    if not user:
+        return None, False
+    if user == NO_USER_VALUE:
+        return None, True
+    return user, False
 
 
 class NotAuthenticated(Exception):
@@ -295,14 +311,30 @@ async def cache_purge_submit(request: Request):
 
 
 @router.get("/logs")
-async def logs(request: Request, status: str | None = None, limit: int = 50):
+async def logs(
+    request: Request,
+    status: str | None = None,
+    tenant: str | None = None,
+    user: str | None = None,
+    limit: int = 50,
+):
     db: sqlite3.Connection = request.app.state.db
     start, end, meta = _resolve(request)
     parsed_status = status.strip() if status and status.strip() in VALID_STATUSES else None
+    parsed_tenant = tenant.strip() if tenant and tenant.strip() else None
+    parsed_user = user.strip() if user and user.strip() else None
+    user_name, no_user = _user_filter(parsed_user)
 
-    rows = recent_requests(db, start, end, limit=limit)
-    if parsed_status:
-        rows = [row for row in rows if row["status"] == parsed_status]
+    rows = recent_requests(
+        db,
+        start,
+        end,
+        status=parsed_status,
+        tenant_code=parsed_tenant,
+        user_name=user_name,
+        no_user=no_user,
+        limit=limit,
+    )
 
     return templates.TemplateResponse(
         request,
@@ -310,6 +342,14 @@ async def logs(request: Request, status: str | None = None, limit: int = 50):
         {
             "entries": rows,
             "status": parsed_status or "",
+            # The dropdown option lists are drawn from the whole period, not
+            # the filtered rows -- otherwise picking a tenant would empty the
+            # user dropdown of everyone it just excluded.
+            "tenant_options": requests_by_tenant(db, start, end),
+            "user_options": distinct_user_names(db, start, end),
+            "tenant": parsed_tenant or "",
+            "user": parsed_user or "",
+            "no_user_value": NO_USER_VALUE,
             "limit": limit,
             "filter_meta": meta,
             "mock_mode": request.app.state.settings.mock_mode,
@@ -415,11 +455,24 @@ async def tenants_page(request: Request):
 
 
 @router.get("/tenants/{tenant_code}")
-async def tenant_detail(request: Request, tenant_code: str):
+async def tenant_detail(request: Request, tenant_code: str, user: str | None = None):
     db: sqlite3.Connection = request.app.state.db
     start, end, meta = _resolve(request)
+    parsed_user = user.strip() if user and user.strip() else None
+    user_name, no_user = _user_filter(parsed_user)
+
+    # The user filter scopes the recent-requests table only -- the tiles stay
+    # whole-tenant, so `tenant_stats` is deliberately left unfiltered here.
     stats = tenant_stats(db, tenant_code, start, end)
-    recent = recent_requests(db, start, end, tenant_code=tenant_code, limit=20)
+    recent = recent_requests(
+        db,
+        start,
+        end,
+        tenant_code=tenant_code,
+        user_name=user_name,
+        no_user=no_user,
+        limit=20,
+    )
     return templates.TemplateResponse(
         request,
         "tenant_detail.html",
@@ -427,6 +480,9 @@ async def tenant_detail(request: Request, tenant_code: str):
             "tenant_code": tenant_code,
             "stats": stats,
             "recent": recent,
+            "user_options": distinct_user_names(db, start, end, tenant_code=tenant_code),
+            "user": parsed_user or "",
+            "no_user_value": NO_USER_VALUE,
             "filter_meta": meta,
             "mock_mode": request.app.state.settings.mock_mode,
         },

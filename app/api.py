@@ -1,19 +1,28 @@
-"""POST /v1/extract and GET /healthz."""
+"""POST /v1/extract, POST /v1/purge-cache, GET /healthz, GET /v1/models and GET /v1/stats."""
 
 from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.security import APIKeyHeader
 
-from app.db import insert_request, verify_api_key
+from app.db import cache_purge, insert_request, verify_api_key
 from app.llm import build_client
 from app.normalize.image import SUPPORTED_CONTENT_TYPES, detect_content_type
 from app.pipeline import extract as run_pipeline
-from app.schemas import ExtractionResponse, ModelInfo, ModelsResponse
+from app.pipeline import usd_to_vnd
+from app.schemas import (
+    CachePurgeResponse,
+    ExtractionResponse,
+    ModelInfo,
+    ModelsResponse,
+    TenantStatsResponse,
+)
 from app.settings import Settings
+from app.stats import resolve_period, tenant_stats
 
 router = APIRouter()
 
@@ -80,6 +89,49 @@ def list_models(request: Request) -> ModelsResponse:
             for m in settings.llm_models
         ],
         prompt_version=settings.prompt_version,
+    )
+
+
+@router.get("/v1/stats", response_model=TenantStatsResponse)
+def tenant_stats_endpoint(
+    request: Request,
+    tenant_code: str = Query(...),
+    user_name: str | None = Query(default=None),
+    period: str | None = Query(default=None),
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+) -> TenantStatsResponse:
+    # No auth dependency, by design -- see TenantStatsResponse in app.schemas
+    # for what that exposes and docs/OPERATIONS.md for the mitigation.
+    settings: Settings = request.app.state.settings
+    db: sqlite3.Connection = request.app.state.db
+
+    try:
+        start_utc, end_utc, meta = resolve_period(
+            period, start, end, datetime.now(UTC), tz=settings.app_timezone
+        )
+    except ValueError as exc:
+        # The dashboard routes let this 500; an API client deserves a 400.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    stats = tenant_stats(db, tenant_code, start_utc, end_utc, user_name=user_name)
+    return TenantStatsResponse(
+        tenant_code=tenant_code,
+        user_name=user_name,
+        period=meta["period"],
+        start=meta["start"] or None,
+        end=meta["end"] or None,
+        request_count=stats["total_requests"],
+        status_counts=stats["status_counts"],
+        avg_confidence=stats["avg_confidence"],
+        tokens_in=stats["tokens_in"],
+        tokens_out=stats["tokens_out"],
+        tokens_total=stats["tokens_total"],
+        cost_usd=stats["total_cost_usd"],
+        cost_vnd=usd_to_vnd(stats["total_cost_usd"], settings.usd_to_vnd_rate),
+        cache_hit_rate=stats["cache_hit_rate"],
+        first_used_at=stats["first_used_at"],
+        last_used_at=stats["last_used_at"],
     )
 
 
@@ -178,3 +230,17 @@ async def extract_endpoint(
     if not settings.expose_usage_in_response:
         response = response.model_copy(update={"usage": None})
     return response
+
+
+@router.post("/v1/purge-cache", response_model=CachePurgeResponse)
+def purge_cache_endpoint(
+    request: Request,
+    api_key_row: sqlite3.Row | None = Depends(require_api_key),
+) -> CachePurgeResponse:
+    # Same X-API-Key gate as /v1/extract -- and the same escape hatch: with
+    # api_key_required=false this is open to anyone who can reach it, which
+    # is a bigger deal here than on /v1/extract because it's destructive.
+    # The cache is a cost optimization, never a source of truth, so purging
+    # it costs money (re-extraction), not data.
+    db: sqlite3.Connection = request.app.state.db
+    return CachePurgeResponse(purged=cache_purge(db))

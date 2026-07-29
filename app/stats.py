@@ -361,15 +361,38 @@ def recent_requests(
     *,
     api_key_id: str | None = None,
     tenant_code: str | None = None,
+    status: str | None = None,
+    user_name: str | None = None,
+    no_user: bool = False,
     limit: int = 20,
 ) -> list[sqlite3.Row]:
+    """Every filter is applied in SQL, before `LIMIT` -- filtering the rows
+    in Python afterwards would mean "the matching ones among the newest
+    `limit`" rather than "the newest `limit` matching ones".
+
+    `user_name` and `no_user` are separate params because NULL is a
+    legitimate filter target (dashboard test-uploads, header-less API calls)
+    and `user_name=None` already means "don't filter on user at all".
+    """
     where, params = _where_clause(start_utc, end_utc)
+    clauses = []
     if api_key_id is not None:
-        where = f"{where} AND api_key_id = ?" if where else "WHERE api_key_id = ?"
-        params = [*params, api_key_id]
+        clauses.append("api_key_id = ?")
+        params.append(api_key_id)
     if tenant_code is not None:
-        where = f"{where} AND tenant_code = ?" if where else "WHERE tenant_code = ?"
-        params = [*params, tenant_code]
+        clauses.append("tenant_code = ?")
+        params.append(tenant_code)
+    if status is not None:
+        clauses.append("status = ?")
+        params.append(status)
+    if user_name is not None:
+        clauses.append("user_name = ?")
+        params.append(user_name)
+    if no_user:
+        clauses.append("user_name IS NULL")
+    if clauses:
+        joined = " AND ".join(clauses)
+        where = f"{where} AND {joined}" if where else f"WHERE {joined}"
     return conn.execute(
         f"SELECT * FROM requests {where} ORDER BY created_at DESC LIMIT ?",
         [*params, limit],
@@ -404,11 +427,16 @@ def tenant_stats(
     tenant_code: str,
     start_utc: datetime | None,
     end_utc: datetime | None,
+    *,
+    user_name: str | None = None,
 ) -> dict:
     where, params = _where_clause(start_utc, end_utc)
     tenant_clause = "tenant_code = ?"
     where = f"{where} AND {tenant_clause}" if where else f"WHERE {tenant_clause}"
     params = [*params, tenant_code]
+    if user_name is not None:
+        where = f"{where} AND user_name = ?"
+        params = [*params, user_name]
 
     row = conn.execute(
         f"""
@@ -451,6 +479,35 @@ def tenant_stats(
         "first_used_at": row["first_used_at"],
         "last_used_at": row["last_used_at"],
     }
+
+
+def distinct_user_names(
+    conn: sqlite3.Connection,
+    start_utc: datetime | None,
+    end_utc: datetime | None,
+    *,
+    tenant_code: str | None = None,
+) -> list[dict]:
+    """Users seen in the window, for the dashboard's user-filter dropdown.
+    The `user_name IS NULL` group is included as a `None` entry -- callers
+    render it as "(no user)" -- since header-less requests are a real slice
+    an operator wants to isolate, not an absence of data.
+    """
+    where, params = _where_clause(start_utc, end_utc)
+    if tenant_code is not None:
+        where = f"{where} AND tenant_code = ?" if where else "WHERE tenant_code = ?"
+        params = [*params, tenant_code]
+    rows = conn.execute(
+        f"""
+        SELECT user_name, COUNT(*) AS count
+        FROM requests
+        {where}
+        GROUP BY user_name
+        ORDER BY count DESC
+        """,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def requests_by_tenant_stats(

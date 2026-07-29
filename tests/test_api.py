@@ -1,4 +1,4 @@
-from app.db import create_api_key, get_request, revoke_api_key
+from app.db import cache_set, create_api_key, get_request, revoke_api_key
 from app.settings import ModelConfig
 
 
@@ -261,3 +261,133 @@ def test_list_models_never_leaks_base_url_or_api_key(client):
         "price_per_1m_output",
         "is_default",
     }
+
+
+# ---- GET /v1/stats ----
+
+
+def _seed_extract(client, api_key, jpeg_bytes, *, tenant, user=None):
+    headers = {"X-API-Key": api_key, "X-TenantCode": tenant}
+    if user is not None:
+        headers["X-UserName"] = user
+    r = client.post(
+        "/v1/extract",
+        files={"file": ("i.jpg", jpeg_bytes, "image/jpeg")},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    return r.json()
+
+
+def test_stats_needs_no_api_key(client):
+    # No X-API-Key header at all -- unauthenticated by design, like /healthz.
+    r = client.get("/v1/stats", params={"tenant_code": "acme", "period": "all"})
+    assert r.status_code == 200
+    assert r.json()["request_count"] == 0
+
+
+def test_stats_requires_tenant_code(client):
+    r = client.get("/v1/stats", params={"period": "all"})
+    assert r.status_code == 422
+
+
+def test_stats_rejects_unknown_period_with_400(client):
+    r = client.get("/v1/stats", params={"tenant_code": "acme", "period": "since_forever"})
+    assert r.status_code == 400
+    assert "since_forever" in r.json()["detail"]
+
+
+def test_stats_aggregates_across_users_of_one_tenant(client, api_key, sample_jpeg_bytes):
+    client.app.state.settings.cache_enabled = False
+    _seed_extract(client, api_key, sample_jpeg_bytes, tenant="acme", user="alice")
+    _seed_extract(client, api_key, sample_jpeg_bytes, tenant="acme", user="bob")
+    _seed_extract(client, api_key, sample_jpeg_bytes, tenant="beta", user="alice")
+
+    body = client.get("/v1/stats", params={"tenant_code": "acme", "period": "all"}).json()
+    assert body["tenant_code"] == "acme"
+    assert body["user_name"] is None
+    assert body["request_count"] == 2
+    assert body["status_counts"]["usable"] == 2
+    assert body["tokens_total"] > 0
+
+
+def test_stats_user_name_narrows_to_one_person(client, api_key, sample_jpeg_bytes):
+    client.app.state.settings.cache_enabled = False
+    _seed_extract(client, api_key, sample_jpeg_bytes, tenant="acme", user="alice")
+    _seed_extract(client, api_key, sample_jpeg_bytes, tenant="acme", user="bob")
+    _seed_extract(client, api_key, sample_jpeg_bytes, tenant="acme")  # no X-UserName
+
+    params = {"tenant_code": "acme", "user_name": "alice", "period": "all"}
+    body = client.get("/v1/stats", params=params).json()
+    assert body["user_name"] == "alice"
+    assert body["request_count"] == 1
+
+
+def test_stats_cost_vnd_matches_configured_rate(client, api_key, sample_jpeg_bytes, app_module):
+    client.app.state.settings.cache_enabled = False
+    _seed_extract(client, api_key, sample_jpeg_bytes, tenant="acme", user="alice")
+
+    body = client.get("/v1/stats", params={"tenant_code": "acme", "period": "all"}).json()
+    assert body["cost_usd"] > 0
+    assert body["cost_vnd"] == round(body["cost_usd"] * app_module.settings.usd_to_vnd_rate)
+
+
+def test_stats_echoes_resolved_period_metadata(client):
+    body = client.get("/v1/stats", params={"tenant_code": "acme", "period": "all"}).json()
+    assert body["period"] == "all"
+    # "all" is unbounded -- no start/end to report.
+    assert body["start"] is None
+    assert body["end"] is None
+
+
+# ---- POST /v1/purge-cache ----
+
+
+def test_purge_cache_requires_api_key(client):
+    r = client.post("/v1/purge-cache")
+    assert r.status_code == 401
+
+
+def test_purge_cache_rejects_unknown_key(client):
+    r = client.post("/v1/purge-cache", headers={"X-API-Key": "hsv_not-a-real-key"})
+    assert r.status_code == 401
+
+
+def test_purge_cache_rejects_revoked_key(client):
+    key = create_api_key(client.app.state.db, "revoke-me")
+    revoke_api_key(client.app.state.db, key["id"])
+
+    r = client.post("/v1/purge-cache", headers={"X-API-Key": key["plaintext"]})
+    assert r.status_code == 401
+
+
+def test_purge_cache_skips_auth_when_api_key_not_required(client):
+    client.app.state.settings.api_key_required = False
+    r = client.post("/v1/purge-cache")
+    assert r.status_code == 200
+
+
+def test_purge_cache_reports_number_of_entries_removed(auth_client):
+    cache_set(auth_client.app.state.db, "key-1", {"a": 1})
+    cache_set(auth_client.app.state.db, "key-2", {"b": 2})
+
+    r = auth_client.post("/v1/purge-cache")
+    assert r.status_code == 200
+    assert r.json() == {"purged": 2}
+
+
+def test_purge_cache_on_empty_cache_returns_zero(auth_client):
+    r = auth_client.post("/v1/purge-cache")
+    assert r.status_code == 200
+    assert r.json() == {"purged": 0}
+
+
+def test_purge_cache_makes_next_identical_request_a_miss(auth_client, sample_jpeg_bytes):
+    files = {"file": ("i.jpg", sample_jpeg_bytes, "image/jpeg")}
+    auth_client.post("/v1/extract", files=files)
+    assert auth_client.post("/v1/extract", files=files).json()["usage"]["cached"] is True
+
+    assert auth_client.post("/v1/purge-cache").json()["purged"] == 1
+
+    r = auth_client.post("/v1/extract", files=files)
+    assert r.json()["usage"]["cached"] is False

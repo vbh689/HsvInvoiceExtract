@@ -203,3 +203,37 @@ class ModelInfo(BaseModel):
 class ModelsResponse(BaseModel):
     models: list[ModelInfo]
     prompt_version: str
+
+
+# ---- POST /v1/purge-cache ----
+
+
+class CachePurgeResponse(BaseModel):
+    purged: int  # number of extraction_cache rows deleted
+
+
+# ---- GET /v1/stats ----
+#
+# Also unauthenticated. Unlike ModelInfo above this does expose per-tenant
+# volume and spend, so anyone who can reach the endpoint and guess a tenant
+# code can read it -- restrict at the reverse proxy if that matters (see
+# docs/OPERATIONS.md).
+
+
+class TenantStatsResponse(BaseModel):
+    tenant_code: str
+    user_name: str | None = None
+    period: str
+    start: str | None = None
+    end: str | None = None
+    request_count: int
+    status_counts: dict[str, int]
+    avg_confidence: float
+    tokens_in: int
+    tokens_out: int
+    tokens_total: int
+    cost_usd: float
+    cost_vnd: int  # cost_usd converted at settings.usd_to_vnd_rate
+    cache_hit_rate: float
+    first_used_at: str | None = None
+    last_used_at: str | None = None

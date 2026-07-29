@@ -62,7 +62,7 @@ def compute_cache_key(
     return hashlib.sha256(key.encode()).hexdigest()
 
 
-def _usd_to_vnd(cost_usd: float, rate: float) -> int:
+def usd_to_vnd(cost_usd: float, rate: float) -> int:
     return round(cost_usd * rate)
 
 
@@ -132,7 +132,7 @@ def _malformed_response(
             tokens_out=call_result.tokens_out if call_result else 0,
             tokens_total=call_result.tokens_total if call_result else 0,
             cost_usd=call_result.cost_usd if call_result else 0.0,
-            cost_vnd=_usd_to_vnd(
+            cost_vnd=usd_to_vnd(
                 call_result.cost_usd if call_result else 0.0, settings.usd_to_vnd_rate
             ),
             prompt_version=settings.prompt_version,
@@ -255,7 +255,7 @@ async def extract(
             tokens_out=call_result.tokens_out,
             tokens_total=call_result.tokens_total,
             cost_usd=call_result.cost_usd,
-            cost_vnd=_usd_to_vnd(call_result.cost_usd, settings.usd_to_vnd_rate),
+            cost_vnd=usd_to_vnd(call_result.cost_usd, settings.usd_to_vnd_rate),
             prompt_version=settings.prompt_version,
             schema_version=settings.schema_version,
         ),

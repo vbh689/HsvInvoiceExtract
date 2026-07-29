@@ -3,7 +3,7 @@
 {% block page_heading %}Audit Logs{% endblock %}
 {% block content %}
 
-{% with preserve_params = {"status": status, "limit": limit} %}
+{% with preserve_params = {"status": status, "tenant": tenant, "user": user, "limit": limit} %}
 {% include "filter_bar.html" %}
 {% endwith %}
 
@@ -12,6 +12,7 @@
         <input type="hidden" name="period" value="{{ filter_meta.period }}">
         <input type="hidden" name="start" value="{{ filter_meta.start }}">
         <input type="hidden" name="end" value="{{ filter_meta.end }}">
+        <input type="hidden" name="limit" value="{{ limit }}">
         <div class="status-filter-group">
             <span class="filter-label">Status</span>
             <select name="status" class="form-select" onchange="this.form.submit()">
@@ -21,17 +22,37 @@
                 <option value="unusable" {% if status == "unusable" %}selected{% endif %}>Unusable</option>
             </select>
         </div>
+        <div class="status-filter-group">
+            <span class="filter-label">Tenant</span>
+            <select name="tenant" class="form-select" onchange="this.form.submit()">
+                <option value="" {% if not tenant %}selected{% endif %}>All</option>
+                {% for opt in tenant_options %}
+                <option value="{{ opt.tenant_code }}" {% if tenant == opt.tenant_code %}selected{% endif %}>{{ opt.tenant_code }} ({{ opt.count }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="status-filter-group">
+            <span class="filter-label">User</span>
+            <select name="user" class="form-select" onchange="this.form.submit()">
+                <option value="" {% if not user %}selected{% endif %}>All</option>
+                {% for opt in user_options %}
+                {% set opt_value = opt.user_name if opt.user_name else no_user_value %}
+                <option value="{{ opt_value }}" {% if user == opt_value %}selected{% endif %}>{{ opt.user_name or "(no user)" }} ({{ opt.count }})</option>
+                {% endfor %}
+            </select>
+        </div>
     </form>
 </div>
 
 <div class="table-card">
     <table>
-        <thead><tr><th>Time</th><th>Source</th><th>Key</th><th>User</th><th>Filename</th><th>Status</th><th>Confidence</th><th>Lines</th><th>Cost</th><th></th></tr></thead>
+        <thead><tr><th>Time</th><th>Source</th><th>Tenant</th><th>Key</th><th>User</th><th>Filename</th><th>Status</th><th>Confidence</th><th>Lines</th><th>Cost</th><th></th></tr></thead>
         <tbody>
         {% for row in entries %}
             <tr>
                 <td>{{ row["created_at"] }}</td>
                 <td>{{ row["source"] }}</td>
+                <td>{{ row["tenant_code"] }}</td>
                 <td>{{ row["api_key_label"] or "—" }}</td>
                 <td>{{ row["user_name"] or "—" }}</td>
                 <td>{{ row["filename"] or "—" }}</td>
@@ -42,7 +63,7 @@
                 <td><a href="/dashboard/logs/{{ row['request_id'] }}">view</a></td>
             </tr>
         {% else %}
-            <tr><td colspan="10">No requests match this filter.</td></tr>
+            <tr><td colspan="11">No requests match this filter.</td></tr>
         {% endfor %}
         </tbody>
     </table>

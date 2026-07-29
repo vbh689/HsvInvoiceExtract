@@ -3,7 +3,7 @@ import importlib
 import pytest
 from fastapi.testclient import TestClient
 
-from app.db import cache_get, cache_set, list_api_keys
+from app.db import cache_get, cache_set, insert_request, list_api_keys
 from app.settings import ModelConfig
 
 
@@ -341,6 +341,158 @@ def test_statistics_export_by_tenant_csv_returns_one_row_per_tenant(
     )
     assert len(lines) == 2
     assert lines[1].startswith("1,")
+
+
+# ---- Logs / tenant-detail filters ----
+
+
+def _seed(conn, request_id, *, tenant_code="1", user_name=None, status="usable"):
+    """Inserts an audit-log row directly -- the dashboard's own test-upload
+    route always writes tenant "1" / no user, so varied rows have to be
+    seeded rather than produced.
+    """
+    insert_request(
+        conn,
+        {
+            "request_id": request_id,
+            "created_at": "2026-07-29T00:00:00+00:00",
+            "api_key_id": None,
+            "api_key_label": "seeded",
+            "source": "api",
+            "tenant_code": tenant_code,
+            "user_name": user_name,
+            "filename": f"{request_id}.jpg",
+            "content_type": "image/jpeg",
+            "file_bytes": 1234,
+            "page_count": 1,
+            "status": status,
+            "confidence": 0.9,
+            "price_basis": "pre_tax",
+            "line_count": 2,
+            "grand_total": 100_000,
+            "cache_hit": 0,
+            "model": "fake-model",
+            "attempt_count": 1,
+            "latency_ms": 500.0,
+            "tokens_in": 100,
+            "tokens_out": 50,
+            "tokens_cached": 0,
+            "tokens_total": 150,
+            "cost_usd": 0.01,
+            "cost_source": "computed",
+            "usage_json": "{}",
+            "response_json": "{}",
+            "error": None,
+        },
+    )
+
+
+def test_logs_page_shows_tenant_column(authed_client, dash_client):
+    _seed(dash_client.app.state.db, "r1", tenant_code="acme")
+
+    r = authed_client.get("/dashboard/logs?period=all")
+    assert r.status_code == 200
+    assert "<th>Tenant</th>" in r.text
+    assert "acme" in r.text
+
+
+def test_logs_tenant_filter_narrows_rows(authed_client, dash_client):
+    db = dash_client.app.state.db
+    _seed(db, "r1", tenant_code="acme")
+    _seed(db, "r2", tenant_code="beta")
+
+    r = authed_client.get("/dashboard/logs?period=all&tenant=acme")
+    assert "r1.jpg" in r.text
+    assert "r2.jpg" not in r.text
+
+
+def test_logs_user_filter_narrows_rows(authed_client, dash_client):
+    db = dash_client.app.state.db
+    _seed(db, "r1", user_name="alice")
+    _seed(db, "r2", user_name="bob")
+
+    r = authed_client.get("/dashboard/logs?period=all&user=alice")
+    assert "r1.jpg" in r.text
+    assert "r2.jpg" not in r.text
+
+
+def test_logs_no_user_sentinel_selects_rows_without_a_user(authed_client, dash_client):
+    db = dash_client.app.state.db
+    _seed(db, "r1", user_name="alice")
+    _seed(db, "r2", user_name=None)
+
+    r = authed_client.get("/dashboard/logs?period=all&user=__none__")
+    assert "r2.jpg" in r.text
+    assert "r1.jpg" not in r.text
+
+
+def test_logs_filters_combine(authed_client, dash_client):
+    db = dash_client.app.state.db
+    _seed(db, "match", tenant_code="acme", user_name="alice", status="unusable")
+    _seed(db, "wrong-status", tenant_code="acme", user_name="alice", status="usable")
+    _seed(db, "wrong-user", tenant_code="acme", user_name="bob", status="unusable")
+    _seed(db, "wrong-tenant", tenant_code="beta", user_name="alice", status="unusable")
+
+    r = authed_client.get("/dashboard/logs?period=all&tenant=acme&user=alice&status=unusable")
+    assert "match.jpg" in r.text
+    for other in ("wrong-status.jpg", "wrong-user.jpg", "wrong-tenant.jpg"):
+        assert other not in r.text
+
+
+def test_logs_status_filter_applies_before_limit(authed_client, dash_client):
+    """Regression: the status filter used to run in Python after the SQL
+    LIMIT, so a match outside the newest `limit` rows disappeared.
+    """
+    db = dash_client.app.state.db
+    for i in range(3):
+        _seed(db, f"new-{i}", status="usable")
+    db.execute(
+        "UPDATE requests SET created_at = '2026-07-01T00:00:00+00:00' WHERE request_id = 'new-0'"
+    )
+    db.commit()
+    _seed(db, "old-unusable", status="unusable")
+    db.execute(
+        "UPDATE requests SET created_at = '2026-06-01T00:00:00+00:00' "
+        "WHERE request_id = 'old-unusable'"
+    )
+    db.commit()
+
+    r = authed_client.get("/dashboard/logs?period=all&status=unusable&limit=2")
+    assert "old-unusable.jpg" in r.text
+
+
+def test_logs_period_buttons_preserve_tenant_and_user(authed_client, dash_client):
+    _seed(dash_client.app.state.db, "r1", tenant_code="acme", user_name="alice")
+
+    r = authed_client.get("/dashboard/logs?period=all&tenant=acme&user=alice")
+    assert '<input type="hidden" name="tenant" value="acme">' in r.text
+    assert '<input type="hidden" name="user" value="alice">' in r.text
+
+
+def test_tenant_detail_user_filter_narrows_table_but_not_tiles(authed_client, dash_client):
+    db = dash_client.app.state.db
+    _seed(db, "r1", tenant_code="acme", user_name="alice")
+    _seed(db, "r2", tenant_code="acme", user_name="bob")
+    _seed(db, "r3", tenant_code="acme", user_name=None)
+
+    r = authed_client.get("/dashboard/tenants/acme?period=all&user=alice")
+    assert r.status_code == 200
+    assert "r1.jpg" not in r.text  # the tenant table has no Filename column
+    # Recent-requests table is scoped to alice...
+    assert ">alice<" in r.text
+    assert ">bob<" not in r.text
+    # ...while the Requests tile stays whole-tenant.
+    assert '<div class="tile-value">3</div>' in r.text
+
+
+def test_tenant_detail_user_dropdown_lists_that_tenants_users_only(authed_client, dash_client):
+    db = dash_client.app.state.db
+    _seed(db, "r1", tenant_code="acme", user_name="alice")
+    _seed(db, "r2", tenant_code="beta", user_name="zoe")
+
+    r = authed_client.get("/dashboard/tenants/acme?period=all")
+    assert "alice" in r.text
+    assert "zoe" not in r.text
 
 
 def test_no_page_leaks_raw_provider_key(authed_client, dash_client, sample_jpeg_bytes):

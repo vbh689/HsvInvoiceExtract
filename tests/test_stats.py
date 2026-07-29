@@ -11,6 +11,7 @@ from app.stats import (
     cache_growth_over_time,
     cache_stats,
     confidence_over_time,
+    distinct_user_names,
     errors_over_time,
     findings_by_code,
     key_stats,
@@ -585,6 +586,109 @@ def test_recent_requests_filters_by_tenant_code_independently_of_api_key(db):
 
     rows = recent_requests(db, None, None, tenant_code="acme")
     assert {row["request_id"] for row in rows} == {"r1", "r3"}
+
+
+def test_tenant_stats_narrows_to_one_user(db):
+    insert_request(
+        db, _row(request_id="r1", tenant_code="acme", user_name="alice", tokens_total=100)
+    )
+    insert_request(db, _row(request_id="r2", tenant_code="acme", user_name="bob", tokens_total=200))
+    insert_request(db, _row(request_id="r3", tenant_code="acme", user_name=None, tokens_total=400))
+
+    assert tenant_stats(db, "acme", None, None)["total_requests"] == 3
+    alice = tenant_stats(db, "acme", None, None, user_name="alice")
+    assert alice["total_requests"] == 1
+    assert alice["tokens_total"] == 100
+
+
+def test_tenant_stats_user_filter_does_not_leak_across_tenants(db):
+    insert_request(db, _row(request_id="r1", tenant_code="acme", user_name="alice"))
+    insert_request(db, _row(request_id="r2", tenant_code="beta", user_name="alice"))
+
+    stats = tenant_stats(db, "acme", None, None, user_name="alice")
+    assert stats["total_requests"] == 1
+
+
+def test_recent_requests_filters_by_user_name(db):
+    insert_request(db, _row(request_id="r1", user_name="alice"))
+    insert_request(db, _row(request_id="r2", user_name="bob"))
+    insert_request(db, _row(request_id="r3", user_name=None))
+
+    rows = recent_requests(db, None, None, user_name="alice")
+    assert {row["request_id"] for row in rows} == {"r1"}
+
+
+def test_recent_requests_no_user_selects_only_null_user_rows(db):
+    insert_request(db, _row(request_id="r1", user_name="alice"))
+    insert_request(db, _row(request_id="r2", user_name=None))
+    insert_request(db, _row(request_id="r3", user_name=None))
+
+    rows = recent_requests(db, None, None, no_user=True)
+    assert {row["request_id"] for row in rows} == {"r2", "r3"}
+
+
+def test_recent_requests_filters_by_status(db):
+    insert_request(db, _row(request_id="r1", status="usable"))
+    insert_request(db, _row(request_id="r2", status="unusable"))
+
+    rows = recent_requests(db, None, None, status="unusable")
+    assert {row["request_id"] for row in rows} == {"r2"}
+
+
+def test_recent_requests_status_filter_applies_before_limit(db):
+    """The regression this guards: filtering in Python after the SQL LIMIT
+    returned "the unusable ones among the newest N" rather than "the newest N
+    unusable ones" -- here, nothing at all.
+    """
+    for i in range(5):
+        insert_request(
+            db,
+            _row(
+                request_id=f"new-{i}",
+                status="usable",
+                created_at=f"2026-07-2{i}T00:00:00+00:00",
+            ),
+        )
+    insert_request(
+        db, _row(request_id="old", status="unusable", created_at="2026-07-01T00:00:00+00:00")
+    )
+
+    rows = recent_requests(db, None, None, status="unusable", limit=2)
+    assert [row["request_id"] for row in rows] == ["old"]
+
+
+def test_recent_requests_combines_tenant_status_and_user_filters(db):
+    insert_request(
+        db, _row(request_id="r1", tenant_code="acme", user_name="alice", status="usable")
+    )
+    insert_request(
+        db, _row(request_id="r2", tenant_code="acme", user_name="alice", status="unusable")
+    )
+    insert_request(db, _row(request_id="r3", tenant_code="acme", user_name="bob", status="usable"))
+    insert_request(
+        db, _row(request_id="r4", tenant_code="beta", user_name="alice", status="usable")
+    )
+
+    rows = recent_requests(db, None, None, tenant_code="acme", user_name="alice", status="usable")
+    assert {row["request_id"] for row in rows} == {"r1"}
+
+
+def test_distinct_user_names_includes_null_group_ordered_by_count(db):
+    insert_request(db, _row(request_id="r1", user_name="alice"))
+    insert_request(db, _row(request_id="r2", user_name="alice"))
+    insert_request(db, _row(request_id="r3", user_name="bob"))
+    insert_request(db, _row(request_id="r4", user_name=None))
+
+    rows = distinct_user_names(db, None, None)
+    assert [(r["user_name"], r["count"]) for r in rows] == [("alice", 2), ("bob", 1), (None, 1)]
+
+
+def test_distinct_user_names_scoped_to_tenant(db):
+    insert_request(db, _row(request_id="r1", tenant_code="acme", user_name="alice"))
+    insert_request(db, _row(request_id="r2", tenant_code="beta", user_name="bob"))
+
+    rows = distinct_user_names(db, None, None, tenant_code="acme")
+    assert [r["user_name"] for r in rows] == ["alice"]
 
 
 def test_api_key_summary_active_vs_revoked(db):
