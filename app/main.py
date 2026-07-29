@@ -48,3 +48,17 @@ async def _redirect_to_login(request: Request, exc: NotAuthenticated) -> Redirec
 app.include_router(api_router)
 app.include_router(dashboard_public_router)
 app.include_router(dashboard_router)
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    # Import string (not the `app` object) so --reload can re-exec on file
+    # changes; host/port/log_level come from .env instead of being hardcoded.
+    uvicorn.run(
+        "app.main:app",
+        host=settings.host,
+        port=settings.port,
+        log_level=settings.log_level,
+        reload=True,
+    )

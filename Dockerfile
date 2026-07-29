@@ -50,9 +50,15 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1
 
 USER app
+# Documentation only -- actual bind address/port come from HOST/PORT in .env
+# at container start (see CMD below); EXPOSE can't read runtime env vars.
 EXPOSE 8000
 
+# Reads $PORT (falls back to 8000) so the probe stays correct even if an
+# operator overrides PORT in .env.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status == 200 else 1)"
+  CMD python -c "import os,urllib.request,sys; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\", 8000)}/healthz', timeout=3).status == 200 else 1)"
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form so $HOST/$PORT/$LOG_LEVEL (from .env via compose's env_file) are
+# honored, falling back to Settings' defaults when unset.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host \"${HOST:-0.0.0.0}\" --port \"${PORT:-8000}\" --log-level \"${LOG_LEVEL:-info}\""]
