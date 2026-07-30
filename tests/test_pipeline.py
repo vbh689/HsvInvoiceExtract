@@ -49,19 +49,22 @@ VALID_RAW_JSON = {
 }
 
 
-def _call_result(raw_json: dict) -> LLMCallResult:
-    return LLMCallResult(
-        raw_json=raw_json,
-        model="fake-model",
-        latency_ms=1.0,
-        tokens_in=10,
-        tokens_out=5,
-        tokens_total=15,
-        tokens_cached=0,
-        cost_usd=0.001,
-        cost_source="computed",
-        usage_raw={},
-    )
+def _call_result(raw_json: dict | None, **overrides) -> LLMCallResult:
+    values = {
+        "raw_json": raw_json,
+        "model": "fake-model",
+        "latency_ms": 1.0,
+        "tokens_in": 10,
+        "tokens_out": 5,
+        "tokens_total": 15,
+        "tokens_cached": 0,
+        "cost_usd": 0.001,
+        "cost_source": "computed",
+        "usage_raw": {},
+        "content_error": None,
+    }
+    values.update(overrides)
+    return LLMCallResult(**values)
 
 
 class FakeClient:
@@ -140,6 +143,128 @@ async def test_zero_line_items_triggers_retry(db, image_bytes):
     assert result.response.status == "usable"
 
 
+@pytest.mark.parametrize(
+    ("first_result", "expected_outcome"),
+    [
+        (_call_result(dict(VALID_RAW_JSON, line_items=[])), "zero_line_items"),
+        (_call_result({"line_items": "not-a-list"}), "schema_invalid"),
+        (
+            _call_result(
+                None,
+                content_error="model output was not valid JSON: bad content",
+            ),
+            "invalid_json",
+        ),
+    ],
+)
+async def test_retry_aggregates_usage_from_unusable_response(
+    db, image_bytes, first_result, expected_outcome
+):
+    first_result.tokens_in = 11
+    first_result.tokens_out = 7
+    first_result.tokens_total = 21
+    first_result.tokens_cached = 3
+    first_result.cost_usd = 0.002
+    first_result.latency_ms = 90.0
+    first_result.usage_raw = {"prompt_tokens": 11, "total_tokens": 21}
+    second = _call_result(
+        VALID_RAW_JSON,
+        tokens_in=13,
+        tokens_out=8,
+        tokens_total=25,
+        tokens_cached=4,
+        cost_usd=0.003,
+        latency_ms=45.0,
+        usage_raw={"prompt_tokens": 13, "total_tokens": 25},
+    )
+    client = FakeClient([first_result, second])
+
+    result = await _run(Settings(llm_retry_on_failure=True), client, db, image_bytes)
+
+    usage = result.response.usage
+    assert usage.attempts == 2
+    assert (usage.tokens_in, usage.tokens_out, usage.tokens_total) == (24, 15, 46)
+    assert usage.cost_usd == pytest.approx(0.005)
+    assert usage.cost_vnd == round(0.005 * Settings().usd_to_vnd_rate)
+    assert usage.latency_ms == 45.0
+    assert result.tokens_cached == 7
+    assert result.usage_raw["attempts"][0]["outcome"] == expected_outcome
+    assert result.usage_raw["attempts"][1]["outcome"] == "success"
+
+
+async def test_network_failure_contributes_no_usage(db, image_bytes):
+    success = _call_result(
+        VALID_RAW_JSON,
+        tokens_in=13,
+        tokens_out=8,
+        tokens_total=25,
+        tokens_cached=4,
+        cost_usd=0.003,
+        latency_ms=45.0,
+        usage_raw={"prompt_tokens": 13},
+    )
+    client = FakeClient([ConnectionError("boom"), success])
+
+    result = await _run(Settings(llm_retry_on_failure=True), client, db, image_bytes)
+
+    usage = result.response.usage
+    assert (usage.tokens_in, usage.tokens_out, usage.tokens_total) == (13, 8, 25)
+    assert usage.cost_usd == pytest.approx(0.003)
+    failed_attempt = result.usage_raw["attempts"][0]
+    assert failed_attempt["outcome"] == "call_failed"
+    assert "provider_usage" not in failed_attempt
+
+
+async def test_two_unusable_responses_are_both_aggregated(db, image_bytes):
+    first = _call_result(
+        dict(VALID_RAW_JSON, line_items=[]),
+        tokens_in=3,
+        tokens_out=5,
+        tokens_total=10,
+        cost_usd=0.001,
+        latency_ms=12.0,
+    )
+    second = _call_result(
+        {"line_items": "invalid"},
+        tokens_in=7,
+        tokens_out=11,
+        tokens_total=20,
+        cost_usd=0.002,
+        latency_ms=34.0,
+    )
+
+    result = await _run(
+        Settings(llm_retry_on_failure=True), FakeClient([first, second]), db, image_bytes
+    )
+
+    assert result.response.status == "unusable"
+    assert result.response.usage.tokens_total == 30
+    assert result.response.usage.cost_usd == pytest.approx(0.003)
+    assert result.response.usage.latency_ms == 34.0
+
+
+@pytest.mark.parametrize(
+    ("sources", "expected"),
+    [
+        (("provider", "provider"), "provider"),
+        (("computed", "computed"), "computed"),
+        (("provider", "computed"), "computed"),
+    ],
+)
+async def test_aggregate_cost_source(db, image_bytes, sources, expected):
+    first = _call_result(
+        dict(VALID_RAW_JSON, line_items=[]), cost_source=sources[0], cost_usd=0.004
+    )
+    second = _call_result(VALID_RAW_JSON, cost_source=sources[1], cost_usd=0.006)
+
+    result = await _run(
+        Settings(llm_retry_on_failure=True), FakeClient([first, second]), db, image_bytes
+    )
+
+    assert result.cost_source == expected
+    assert result.response.usage.cost_usd == pytest.approx(0.01)
+
+
 async def test_low_confidence_valid_result_does_not_retry(db, image_bytes):
     settings = Settings(llm_retry_on_failure=True)
     # Grand total contradicts the line items -> DOCUMENT_TOTALS_UNRECONCILABLE,
@@ -165,7 +290,7 @@ async def test_retry_disabled_by_setting(db, image_bytes):
 
 async def test_usable_result_is_cached_and_served_on_second_call(db, image_bytes):
     settings = Settings(cache_enabled=True)
-    client = FakeClient([_call_result(VALID_RAW_JSON)])
+    client = FakeClient([_call_result(VALID_RAW_JSON, tokens_cached=4)])
 
     first = await _run(settings, client, db, image_bytes)
     assert first.cache_hit is False
@@ -174,6 +299,7 @@ async def test_usable_result_is_cached_and_served_on_second_call(db, image_bytes
     second = await _run(settings, client, db, image_bytes)
     assert second.cache_hit is True
     assert second.response.usage.cached is True
+    assert second.tokens_cached == 4
     assert client.calls == 1  # model not called again
 
 

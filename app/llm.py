@@ -33,7 +33,10 @@ class MalformedModelOutputError(Exception):
 
 @dataclass
 class LLMCallResult:
-    raw_json: dict
+    # `raw_json` is None when the provider returned content that was not valid
+    # JSON.  The call still carries usage because providers can bill malformed
+    # responses just like successful ones.
+    raw_json: dict | None
     model: str
     latency_ms: float
     tokens_in: int
@@ -43,6 +46,7 @@ class LLMCallResult:
     cost_usd: float
     cost_source: str  # 'provider' | 'computed'
     usage_raw: dict
+    content_error: str | None = None
 
 
 class VisionExtractionClient(Protocol):
@@ -124,15 +128,21 @@ class OpenAICompatibleClient:
         )
         latency_ms = (time.monotonic() - start) * 1000
 
+        # Capture billable telemetry before inspecting model content.  Invalid
+        # JSON is retry-worthy, but it is still a completed provider response
+        # whose usage must contribute to request totals.
+        tokens_in, tokens_out, tokens_total, tokens_cached, cost_usd, cost_source, usage_raw = (
+            _parse_usage(response.usage, self._model)
+        )
+
         message = response.choices[0].message.content
         try:
             raw_json = json.loads(message)
         except (TypeError, ValueError) as exc:
-            raise MalformedModelOutputError(f"model output was not valid JSON: {exc}") from exc
-
-        tokens_in, tokens_out, tokens_total, tokens_cached, cost_usd, cost_source, usage_raw = (
-            _parse_usage(response.usage, self._model)
-        )
+            raw_json = None
+            content_error = f"model output was not valid JSON: {exc}"
+        else:
+            content_error = None
         return LLMCallResult(
             raw_json=raw_json,
             model=self._model.name,
@@ -144,6 +154,7 @@ class OpenAICompatibleClient:
             cost_usd=cost_usd,
             cost_source=cost_source,
             usage_raw=usage_raw,
+            content_error=content_error,
         )
 
 

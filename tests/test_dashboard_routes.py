@@ -1,9 +1,13 @@
 import importlib
+import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+import app.dashboard as dashboard_module
 from app.db import cache_get, cache_set, insert_request, list_api_keys
+from app.llm import LLMCallResult
 from app.settings import ModelConfig
 
 
@@ -268,6 +272,64 @@ def test_extract_submit_runs_pipeline_and_logs_history(
     ).fetchone()
     assert row["source"] == "dashboard"
     assert row["api_key_label"] == "dashboard-test"
+
+
+def test_dashboard_extract_logs_aggregate_retry_usage(
+    authed_client, dash_client, sample_jpeg_bytes, monkeypatch
+):
+    valid = json.loads(
+        (Path(__file__).parent / "fixtures" / "mock_responses" / "default.json").read_text()
+    )
+
+    def call(raw_json, *, tokens, cost, latency):
+        return LLMCallResult(
+            raw_json=raw_json,
+            model="dashboard-model",
+            latency_ms=latency,
+            tokens_in=tokens,
+            tokens_out=tokens + 1,
+            tokens_total=tokens * 3,
+            tokens_cached=1,
+            cost_usd=cost,
+            cost_source="computed",
+            usage_raw={"prompt_tokens": tokens, "total_tokens": tokens * 3},
+        )
+
+    class RetryClient:
+        def __init__(self):
+            self.results = [
+                call(dict(valid, line_items=[]), tokens=10, cost=0.001, latency=80.0),
+                call(valid, tokens=20, cost=0.002, latency=25.0),
+            ]
+
+        async def extract(self, *, images, prompt):
+            return self.results.pop(0)
+
+    dash_client.app.state.settings.cache_enabled = False
+    monkeypatch.setattr(dashboard_module, "build_client", lambda *args, **kwargs: RetryClient())
+
+    r = authed_client.post(
+        "/dashboard/extract",
+        files={"file": ("invoice.jpg", sample_jpeg_bytes, "image/jpeg")},
+    )
+
+    assert r.status_code == 200
+    row = dash_client.app.state.db.execute(
+        "SELECT * FROM requests ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    response = json.loads(row["response_json"])
+    attempt_usage = json.loads(row["usage_json"])["attempts"]
+    assert row["attempt_count"] == response["usage"]["attempts"] == 2
+    assert row["tokens_in"] == response["usage"]["tokens_in"] == 30
+    assert row["tokens_out"] == response["usage"]["tokens_out"] == 32
+    assert row["tokens_total"] == response["usage"]["tokens_total"] == 90
+    assert row["tokens_cached"] == 2
+    assert row["cost_usd"] == response["usage"]["cost_usd"] == 0.003
+    assert row["latency_ms"] == response["usage"]["latency_ms"] == 25.0
+    assert [attempt["outcome"] for attempt in attempt_usage] == [
+        "zero_line_items",
+        "success",
+    ]
 
 
 def _set_two_models(dash_client) -> None:

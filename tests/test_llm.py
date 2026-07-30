@@ -147,3 +147,34 @@ async def test_extract_omits_reasoning_effort_when_off():
     await client.extract(images=[b"fake"], prompt="dummy prompt")
 
     assert "reasoning_effort" not in stub.kwargs
+
+
+async def test_extract_preserves_usage_when_content_is_invalid_json():
+    settings = Settings(llm_supports_structured_output=False)
+    client = OpenAICompatibleClient(settings, _model())
+
+    message = type("Msg", (), {"content": "not json"})()
+    choice = type("Choice", (), {"message": message})()
+    usage = _FakeUsage(
+        {
+            "prompt_tokens": 101,
+            "completion_tokens": 17,
+            "total_tokens": 123,
+            "cost": 0.0042,
+        }
+    )
+    response = type("Response", (), {"choices": [choice], "usage": usage})()
+
+    class _InvalidJsonCompletions:
+        async def create(self, **kwargs):
+            return response
+
+    client._client.chat.completions = _InvalidJsonCompletions()
+
+    result = await client.extract(images=[b"fake"], prompt="dummy prompt")
+
+    assert result.raw_json is None
+    assert result.content_error.startswith("model output was not valid JSON")
+    assert (result.tokens_in, result.tokens_out, result.tokens_total) == (101, 17, 123)
+    assert result.cost_usd == pytest.approx(0.0042)
+    assert result.cost_source == "provider"

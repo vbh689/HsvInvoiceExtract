@@ -1,4 +1,9 @@
+import json
+from pathlib import Path
+
+import app.api as api_module
 from app.db import cache_set, create_api_key, get_request, revoke_api_key
+from app.llm import LLMCallResult
 from app.settings import ModelConfig
 
 
@@ -119,6 +124,76 @@ def test_extract_logs_to_requests_table(auth_client, sample_jpeg_bytes):
     assert row["line_count"] == 2
 
 
+def test_extract_logs_aggregate_retry_usage_consistently(
+    auth_client, sample_jpeg_bytes, monkeypatch
+):
+    valid = json.loads(
+        (Path(__file__).parent / "fixtures" / "mock_responses" / "default.json").read_text()
+    )
+
+    def call(raw_json, **overrides):
+        values = {
+            "raw_json": raw_json,
+            "model": "test-model",
+            "latency_ms": 1.0,
+            "tokens_in": 10,
+            "tokens_out": 5,
+            "tokens_total": 17,
+            "tokens_cached": 2,
+            "cost_usd": 0.001,
+            "cost_source": "computed",
+            "usage_raw": {"prompt_tokens": 10, "total_tokens": 17},
+        }
+        values.update(overrides)
+        return LLMCallResult(**values)
+
+    class RetryClient:
+        def __init__(self):
+            self.results = [
+                call(dict(valid, line_items=[]), latency_ms=99.0),
+                call(
+                    valid,
+                    latency_ms=23.0,
+                    tokens_in=20,
+                    tokens_out=9,
+                    tokens_total=31,
+                    tokens_cached=3,
+                    cost_usd=0.002,
+                    usage_raw={"prompt_tokens": 20, "total_tokens": 31},
+                ),
+            ]
+
+        async def extract(self, *, images, prompt):
+            return self.results.pop(0)
+
+    auth_client.app.state.settings.cache_enabled = False
+    monkeypatch.setattr(api_module, "build_client", lambda *args, **kwargs: RetryClient())
+
+    r = auth_client.post(
+        "/v1/extract", files={"file": ("retry.jpg", sample_jpeg_bytes, "image/jpeg")}
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    usage = body["usage"]
+    row = get_request(auth_client.app.state.db, body["request_id"])
+    stored_response = json.loads(row["response_json"])
+    stored_usage = json.loads(row["usage_json"])
+
+    assert usage["attempts"] == row["attempt_count"] == 2
+    assert usage["latency_ms"] == row["latency_ms"] == 23.0
+    assert usage["tokens_in"] == row["tokens_in"] == 30
+    assert usage["tokens_out"] == row["tokens_out"] == 14
+    assert usage["tokens_total"] == row["tokens_total"] == 48
+    assert row["tokens_cached"] == 5
+    assert usage["cost_usd"] == row["cost_usd"] == 0.003
+    assert stored_response["usage"] == usage
+    assert [item["outcome"] for item in stored_usage["attempts"]] == [
+        "zero_line_items",
+        "success",
+    ]
+
+
 def test_extract_cache_hit_logs_avoided_cost_not_zero(auth_client, sample_jpeg_bytes):
     files = {"file": ("i.jpg", sample_jpeg_bytes, "image/jpeg")}
     first = auth_client.post("/v1/extract", files=files)
@@ -134,6 +209,7 @@ def test_extract_cache_hit_logs_avoided_cost_not_zero(auth_client, sample_jpeg_b
     assert second_row["cost_source"] == "cache_hit"
     assert second_row["cost_usd"] == first_row["cost_usd"]
     assert second_row["tokens_total"] == first_row["tokens_total"]
+    assert second_row["tokens_cached"] == first_row["tokens_cached"]
     assert second_row["cost_usd"] > 0
 
 

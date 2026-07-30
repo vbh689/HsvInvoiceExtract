@@ -46,8 +46,8 @@ POST /v1/extract (gated by X-API-Key, unless API_KEY_REQUIRED=false)
   -> normalize (EXIF correction, downscale to JPEG, PDF->image render)
   -> cache (sha256 of normalized bytes + prompt_version + schema_version
             + model name + reasoning effort)
-  -> call model; one retry on a dead/malformed attempt only
-      -> validate & reconcile (app/validation/)
+  -> call model; when enabled, one retry on a dead/malformed attempt only
+  -> validate & reconcile (app/validation/)
   -> response (always the best attempt, never empty)
   -> request log (SQLite, powers the dashboard and the audit trail)
 ```
