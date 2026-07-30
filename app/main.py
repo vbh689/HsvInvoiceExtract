@@ -47,9 +47,8 @@ async def _redirect_to_login(request: Request, exc: NotAuthenticated) -> Redirec
 
 
 app.include_router(api_router)
-app.include_router(dashboard_public_router)
-app.include_router(dashboard_router)
-
+app.include_router(dashboard_public_router, include_in_schema=False)
+app.include_router(dashboard_router, include_in_schema=False)
 
 if __name__ == "__main__":
     import uvicorn
