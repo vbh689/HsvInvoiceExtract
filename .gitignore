@@ -11,5 +11,8 @@ data/
 .claude/
 .playwright*/
 .ruff_cache/
+AGENTS.md
 CLAUDE.md
 /test*.*
+
+.frontend-slides/
