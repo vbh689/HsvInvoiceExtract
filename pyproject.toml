@@ -7,7 +7,10 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
-    "pydantic-settings>=2.6",
+    # Upper bound: LLMModelsSource reads `env_vars` off the built-in env/dotenv
+    # sources, which is not on the PydanticBaseSettingsSource base class. A
+    # rename in 3.x would break Settings at import time, i.e. at boot.
+    "pydantic-settings>=2.6,<3",
     "python-multipart>=0.0.12",
     "openai>=1.54",
     "pillow>=11.0",

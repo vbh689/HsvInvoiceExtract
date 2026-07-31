@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import os
 import re
 import secrets
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from dotenv import dotenv_values
 from pydantic import BaseModel, Field
 from pydantic_settings import (
     BaseSettings,
@@ -41,16 +40,29 @@ class LLMModelsSource(PydanticBaseSettingsSource):
     `LLM_MODEL_2`, ... aren't declared fields.
     """
 
+    def __init__(
+        self,
+        settings_cls: type[BaseSettings],
+        *,
+        env_vars: Mapping[str, str | None],
+        dotenv_vars: Mapping[str, str | None],
+    ) -> None:
+        super().__init__(settings_cls)
+        self.env_vars = env_vars
+        self.dotenv_vars = dotenv_vars
+
     def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:
         return None, field_name, False  # unused; __call__ is overridden directly
 
     def __call__(self) -> dict[str, Any]:
-        env_file = self.config.get("env_file")
-        raw: dict[str, str | None] = {}
-        if env_file:
-            raw.update(dotenv_values(env_file))
-        raw = {k.upper(): v for k, v in raw.items()}
-        raw.update(os.environ)  # env wins over .env on conflicts
+        # Reuse pydantic-settings' already-loaded sources so per-instance
+        # options such as `_env_file=None` and `_env_file=<custom path>` apply
+        # to numbered model slots exactly as they do to declared fields.
+        # Merged per key, not per slot: a real env var setting only
+        # `LLM_MODEL_1` leaves that slot's `_PRICE_IN`/`_PRICE_OUT` coming from
+        # .env, so a name-only override silently keeps the old model's prices.
+        raw = {key.upper(): value for key, value in self.dotenv_vars.items()}
+        raw.update({key.upper(): value for key, value in self.env_vars.items()})
 
         slots: dict[int, str] = {}
         for key, value in raw.items():
@@ -188,7 +200,11 @@ class Settings(BaseSettings):
         # precedence for every other field.
         return (
             init_settings,
-            LLMModelsSource(settings_cls),
+            LLMModelsSource(
+                settings_cls,
+                env_vars=env_settings.env_vars,
+                dotenv_vars=dotenv_settings.env_vars,
+            ),
             env_settings,
             dotenv_settings,
             file_secret_settings,

@@ -20,6 +20,69 @@ def test_no_model_slots_falls_back_to_single_default(monkeypatch):
     assert settings.default_model.name == "gemini-3.5-flash-lite"
 
 
+def test_env_file_none_ignores_discoverable_dotenv(monkeypatch, tmp_path):
+    """The class-level `env_file=".env"` is CWD-relative, so `_env_file=None`
+    must suppress it. Without this every test using `_settings()` silently
+    picks up the developer's own slots -- and CI, which has no `.env`, never
+    notices.
+    """
+    (tmp_path / ".env").write_text(
+        "LLM_MODEL_1=from-cwd-dotenv\nLLM_MODEL_1_PRICE_IN=9\nLLM_MODEL_1_PRICE_OUT=9\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert [model.name for model in Settings(_env_file=None).llm_models] == [
+        "gemini-3.5-flash-lite"
+    ]
+    # Same CWD, default env_file: the slot *is* picked up, proving the .env
+    # above is discoverable and the assertion isn't vacuous.
+    assert [model.name for model in Settings().llm_models] == ["from-cwd-dotenv"]
+
+
+def test_custom_env_file_is_used_for_numbered_slots(tmp_path):
+    env_file = tmp_path / "models.env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_MODEL_1=from-custom-file",
+                "LLM_MODEL_1_PRICE_IN=1.25",
+                "LLM_MODEL_1_PRICE_OUT=2.5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    settings = Settings(_env_file=env_file)
+
+    assert [model.name for model in settings.llm_models] == ["from-custom-file"]
+    assert settings.llm_models[0].price_per_1m_input == 1.25
+    assert settings.llm_models[0].price_per_1m_output == 2.5
+
+
+def test_environment_model_slot_overrides_custom_env_file(monkeypatch, tmp_path):
+    env_file = tmp_path / "models.env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_MODEL_1=from-custom-file",
+                "LLM_MODEL_1_PRICE_IN=1.25",
+                "LLM_MODEL_1_PRICE_OUT=2.5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LLM_MODEL_1", "from-environment")
+    monkeypatch.setenv("LLM_MODEL_1_PRICE_IN", "3.5")
+    monkeypatch.setenv("LLM_MODEL_1_PRICE_OUT", "4.5")
+
+    settings = Settings(_env_file=env_file)
+
+    assert [model.name for model in settings.llm_models] == ["from-environment"]
+    assert settings.llm_models[0].price_per_1m_input == 3.5
+    assert settings.llm_models[0].price_per_1m_output == 4.5
+
+
 def test_numbered_slots_are_parsed_in_order(monkeypatch):
     settings = _settings(
         monkeypatch,
