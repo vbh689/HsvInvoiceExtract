@@ -86,6 +86,7 @@ class OpenAICompatibleClient:
         self._client = AsyncOpenAI(
             api_key=model.api_key or settings.llm_api_key or "unset",
             base_url=model.base_url or settings.llm_base_url,
+            max_retries=0,
         )
         self._extra_headers: dict[str, str] = {}
         if settings.openrouter_site_url:

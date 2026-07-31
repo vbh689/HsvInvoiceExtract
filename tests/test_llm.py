@@ -111,6 +111,13 @@ def test_model_without_override_falls_back_to_shared_settings():
     assert client._client.api_key == "shared-key"
 
 
+def test_client_disables_sdk_internal_retries():
+    settings = Settings(llm_base_url="https://shared.example/v1", llm_api_key="shared-key")
+    client = OpenAICompatibleClient(settings, _model())
+
+    assert client._client.max_retries == 0
+
+
 class _StubCompletions:
     """Captures kwargs passed to chat.completions.create instead of hitting the network."""
 
